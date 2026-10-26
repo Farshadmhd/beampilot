@@ -1,10 +1,18 @@
 """Known-answer tests for ISO 11146 beam widths, using the simulator."""
 
+from dataclasses import replace
+
 import numpy as np
 import pytest
 
-from beampilot.simulator import BeamParams, CameraConfig, dark_frame
-from beampilot.widths import mean_dark, subtract_background
+from beampilot.simulator import (
+    BeamParams,
+    CameraConfig,
+    beam_diameter,
+    dark_frame,
+    render_frame,
+)
+from beampilot.widths import mean_dark, measure_widths, subtract_background
 
 # Astigmatic test beam: different waist sizes, positions and M² per axis.
 BEAM = BeamParams(
@@ -27,6 +35,11 @@ CAMERA = CameraConfig(
 )
 
 
+NOISELESS = replace(CAMERA, offset_counts=0.0, read_noise_counts=0.0, shot_noise=False)
+PIXEL_M = CAMERA.pixel_size_m
+Z_M = 0.25  # away from both waists: d_x ~ 698 um, d_y ~ 772 um
+EXPOSURE_MS = 20.0  # peak ~ 2900 of 4095 counts at Z_M: unsaturated
+
 # 4 sigma of the corner-patch mean: 4 patches of 18 x 18 px, ~5.2 counts noise each.
 CORNER_MEAN_TOL = 4 * 5.2 / np.sqrt(4 * 18 * 18)
 
@@ -34,6 +47,88 @@ CORNER_MEAN_TOL = 4 * 5.2 / np.sqrt(4 * 18 * 18)
 def _darks(camera: CameraConfig, n: int, seed: int) -> list[np.ndarray]:
     rng = np.random.default_rng(seed)
     return [dark_frame(camera, rng) for _ in range(n)]
+
+
+def _true_diameters(beam: BeamParams, z_m: float) -> tuple[float, float]:
+    d_x = beam_diameter(z_m, beam.d0x_m, beam.z0x_m, beam.m2x, beam.wavelength_m)
+    d_y = beam_diameter(z_m, beam.d0y_m, beam.z0y_m, beam.m2y, beam.wavelength_m)
+    return float(d_x), float(d_y)
+
+
+def _rotated_ellipse(
+    sigma_major_px: float, sigma_minor_px: float, angle_rad: float, n: int = 512
+) -> np.ndarray:
+    """Noiseless elliptical Gaussian, major axis at `angle_rad` from x."""
+    y, x = np.indices((n, n)) - (n - 1) / 2.0
+    u = x * np.cos(angle_rad) + y * np.sin(angle_rad)
+    v = -x * np.sin(angle_rad) + y * np.cos(angle_rad)
+    return 1000.0 * np.exp(
+        -0.5 * (u / sigma_major_px) ** 2 - 0.5 * (v / sigma_minor_px) ** 2
+    )
+
+
+def test_noiseless_centred_beam() -> None:
+    frame = render_frame(BEAM, NOISELESS, Z_M, EXPOSURE_MS, np.random.default_rng(0))
+    result = measure_widths(frame, PIXEL_M)
+    true_x, true_y = _true_diameters(BEAM, Z_M)
+    assert result.converged
+    assert result.d_x_m == pytest.approx(true_x, rel=0.005)
+    assert result.d_y_m == pytest.approx(true_y, rel=0.005)
+
+
+def test_off_centre_beam_gives_same_width_and_correct_centroid() -> None:
+    x0_m, y0_m = 300e-6, -200e-6
+    rng = np.random.default_rng(0)
+    frame = render_frame(BEAM, NOISELESS, Z_M, EXPOSURE_MS, rng, x0_m=x0_m, y0_m=y0_m)
+    result = measure_widths(frame, PIXEL_M)
+    true_x, true_y = _true_diameters(BEAM, Z_M)
+    assert result.d_x_m == pytest.approx(true_x, rel=0.005)
+    assert result.d_y_m == pytest.approx(true_y, rel=0.005)
+    assert result.x_c_m == pytest.approx(x0_m, abs=0.05 * PIXEL_M)
+    assert result.y_c_m == pytest.approx(y0_m, abs=0.05 * PIXEL_M)
+
+
+def test_astigmatic_beam_recovers_both_widths() -> None:
+    beam = replace(
+        BEAM, d0x_m=0.3e-3, d0y_m=0.6e-3, z0x_m=0.0, z0y_m=0.0, m2x=1.0, m2y=1.0
+    )
+    frame = render_frame(beam, NOISELESS, 0.0, 4.0, np.random.default_rng(0))
+    result = measure_widths(frame, PIXEL_M)
+    assert result.d_x_m == pytest.approx(0.3e-3, rel=0.005)
+    assert result.d_y_m == pytest.approx(0.6e-3, rel=0.005)
+    assert result.ellipticity == pytest.approx(0.5, rel=0.01)
+    assert abs(result.azimuth_rad) == pytest.approx(np.pi / 2, abs=np.radians(0.5))
+
+
+@pytest.mark.parametrize("angle_deg", [25.0, -60.0])
+def test_rotated_ellipse_azimuth_recovered(angle_deg: float) -> None:
+    angle = np.radians(angle_deg)
+    sigma_major, sigma_minor = 40.0, 20.0
+    image = _rotated_ellipse(sigma_major, sigma_minor, angle)
+    result = measure_widths(image, PIXEL_M)
+
+    assert result.azimuth_rad == pytest.approx(angle, abs=np.radians(0.5))
+    assert result.ellipticity == pytest.approx(sigma_minor / sigma_major, rel=0.01)
+    # Lab-axis width of a rotated ellipse: sigma_x² = a² cos² + b² sin².
+    var_x_px = (sigma_major * np.cos(angle)) ** 2 + (sigma_minor * np.sin(angle)) ** 2
+    assert result.d_x_m == pytest.approx(4 * np.sqrt(var_x_px) * PIXEL_M, rel=0.005)
+
+
+def test_iteration_converges_before_max_iter() -> None:
+    dark = mean_dark(_darks(CAMERA, 10, seed=0))
+    frame = render_frame(BEAM, CAMERA, Z_M, EXPOSURE_MS, np.random.default_rng(1))
+    image, _ = subtract_background(frame, dark)
+    result = measure_widths(image, PIXEL_M, max_iter=25)
+    assert result.converged
+    assert result.iterations < 25
+
+
+@pytest.mark.parametrize("level", [0.0, -1.0])
+def test_no_beam_gives_nan_not_crash(level: float) -> None:
+    image = np.full((64, 64), level)
+    result = measure_widths(image, PIXEL_M)
+    assert np.isnan(result.d_x_m) and np.isnan(result.d_y_m)
+    assert not result.converged
 
 
 def test_fewer_than_ten_dark_frames_raises() -> None:
