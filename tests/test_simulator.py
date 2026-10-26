@@ -33,7 +33,7 @@ CAMERA = CameraConfig(
     read_noise_counts=5.0,
     signal_counts_per_ms=1e6,
 )
-NOISELESS = replace(CAMERA, offset_counts=0.0, read_noise_counts=0.0)
+NOISELESS = replace(CAMERA, offset_counts=0.0, read_noise_counts=0.0, shot_noise=False)
 
 
 def _centroid(frame: np.ndarray) -> tuple[float, float]:
@@ -119,6 +119,25 @@ def test_saturation_depends_on_exposure_and_position() -> None:
     assert (high == full_scale).any()
     assert not (low == full_scale).any()
     assert not (high_far == full_scale).any()
+
+
+def test_shot_noise_variance_matches_signal() -> None:
+    # A 50 mm beam is flat to < 0.01 % over the central 64 x 64 pixels.
+    flat_beam = replace(
+        BEAM, d0x_m=50e-3, d0y_m=50e-3, z0x_m=0.0, z0y_m=0.0, m2x=1.0, m2y=1.0
+    )
+    bright = replace(CAMERA, signal_counts_per_ms=6.5e10)  # ~2000 counts per pixel
+    patch = np.s_[224:288, 224:288]
+    rng = np.random.default_rng(5)
+
+    with_shot = render_frame(flat_beam, bright, 0.0, 1.0, rng)[patch]
+    no_shot_camera = replace(bright, shot_noise=False)
+    without_shot = render_frame(flat_beam, no_shot_camera, 0.0, 1.0, rng)[patch]
+
+    signal = with_shot.mean() - bright.offset_counts
+    read_variance = bright.read_noise_counts**2
+    assert with_shot.var() == pytest.approx(signal + read_variance, rel=0.1)
+    assert without_shot.var() == pytest.approx(read_variance, rel=0.1)
 
 
 def test_same_seed_gives_identical_frame() -> None:

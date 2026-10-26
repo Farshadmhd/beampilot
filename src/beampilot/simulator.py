@@ -73,6 +73,9 @@ class CameraConfig:
     signal_counts_per_ms : float
         Brightness: total beam signal summed over an unbounded sensor, in
         counts per ms of exposure (before clipping).
+    shot_noise : bool, optional
+        If True (default), apply Poisson shot noise to the beam signal. Assumes
+        a gain of one count per photo-electron.
 
     Raises
     ------
@@ -87,6 +90,7 @@ class CameraConfig:
     offset_counts: float
     read_noise_counts: float
     signal_counts_per_ms: float
+    shot_noise: bool = True
 
     def __post_init__(self) -> None:
         if not self.pixel_size_m > 0:
@@ -176,7 +180,7 @@ def render_frame(
     exposure_ms : float
         Exposure time in ms.
     rng : numpy.random.Generator
-        Random generator for the read noise.
+        Random generator for the shot and read noise.
     x0_m, y0_m : float, optional
         Beam centre relative to the sensor centre in m. Positive x0 moves the
         beam towards higher column indices, positive y0 towards higher row
@@ -212,7 +216,10 @@ def render_frame(
         -0.5 * (x_m[np.newaxis, :] / sigma_x) ** 2
         - 0.5 * (y_m[:, np.newaxis] / sigma_y) ** 2
     )
-    return _digitise(peak_counts * profile, camera, rng)
+    signal_counts = peak_counts * profile
+    if camera.shot_noise:
+        signal_counts = rng.poisson(signal_counts).astype(np.float64)
+    return _digitise(signal_counts, camera, rng)
 
 
 def dark_frame(camera: CameraConfig, rng: np.random.Generator) -> NDArray[np.int32]:
