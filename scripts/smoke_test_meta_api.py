@@ -42,8 +42,11 @@ def main() -> int:
     parser.add_argument(
         "--max-tokens",
         type=int,
-        default=16,
-        help="Maximum number of output tokens (default: 16).",
+        default=256,
+        help=(
+            "Maximum number of output tokens, including hidden reasoning tokens "
+            "(default: 256)."
+        ),
     )
     args = parser.parse_args()
 
@@ -71,12 +74,24 @@ def main() -> int:
         messages=[{"role": "user", "content": "Reply with OK"}],
         max_tokens=args.max_tokens,
     )
-    print(f"Reply: {response.choices[0].message.content!r}")
+    choice = response.choices[0]
+    print(f"Reply: {choice.message.content!r} (finish_reason={choice.finish_reason})")
     if response.usage is not None:
+        details = response.usage.completion_tokens_details
+        reasoning = details.reasoning_tokens if details is not None else None
         print(
             f"Tokens: prompt={response.usage.prompt_tokens}, "
-            f"completion={response.usage.completion_tokens}"
+            f"completion={response.usage.completion_tokens}, "
+            f"reasoning={reasoning}"
         )
+    if choice.message.content is None and choice.finish_reason == "length":
+        # Muse Spark reasons before answering; reasoning tokens count against
+        # max_tokens, so a very small limit can end the reply before any text.
+        print(
+            "Warning: token limit reached before any text. Increase --max-tokens.",
+            file=sys.stderr,
+        )
+        return 1
     return 0
 
 
