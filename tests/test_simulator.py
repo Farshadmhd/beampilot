@@ -36,6 +36,14 @@ CAMERA = CameraConfig(
 NOISELESS = replace(CAMERA, offset_counts=0.0, read_noise_counts=0.0)
 
 
+def _centroid(frame: np.ndarray) -> tuple[float, float]:
+    """Return the centroid (x_c, y_c) in pixels of an offset-free frame."""
+    image = frame.astype(float)
+    y, x = np.indices(image.shape)
+    total = image.sum()
+    return (image * x).sum() / total, (image * y).sum() / total
+
+
 def _second_moment_diameters(
     frame: np.ndarray, pixel_size_m: float
 ) -> tuple[float, float]:
@@ -84,6 +92,19 @@ def test_frame_sum_is_proportional_to_exposure() -> None:
     expected = NOISELESS.signal_counts_per_ms * 5.0
     assert single.sum() == pytest.approx(expected, rel=0.005)
     assert double.sum() == pytest.approx(2.0 * single.sum(), rel=0.005)
+
+
+def test_beam_position_moves_centroid() -> None:
+    x0_m, y0_m = 200e-6, -100e-6
+    rng = np.random.default_rng(0)
+    centred = render_frame(BEAM, NOISELESS, 0.25, 20.0, rng)
+    shifted = render_frame(BEAM, NOISELESS, 0.25, 20.0, rng, x0_m=x0_m, y0_m=y0_m)
+
+    (xc0, yc0), (xc1, yc1) = _centroid(centred), _centroid(shifted)
+    assert xc0 == pytest.approx((NOISELESS.nx - 1) / 2.0, abs=0.01)
+    assert yc0 == pytest.approx((NOISELESS.ny - 1) / 2.0, abs=0.01)
+    assert xc1 - xc0 == pytest.approx(x0_m / NOISELESS.pixel_size_m, abs=0.01)
+    assert yc1 - yc0 == pytest.approx(y0_m / NOISELESS.pixel_size_m, abs=0.01)
 
 
 def test_saturation_depends_on_exposure_and_position() -> None:

@@ -157,8 +157,10 @@ def render_frame(
     z_m: float,
     exposure_ms: float,
     rng: np.random.Generator,
+    x0_m: float = 0.0,
+    y0_m: float = 0.0,
 ) -> NDArray[np.int32]:
-    """Render one camera frame of the beam, centred on the sensor.
+    """Render one camera frame of the beam.
 
     The total beam signal is proportional to the exposure, so the peak pixel
     value is highest near the waist and saturation happens there first.
@@ -175,6 +177,10 @@ def render_frame(
         Exposure time in ms.
     rng : numpy.random.Generator
         Random generator for the read noise.
+    x0_m, y0_m : float, optional
+        Beam centre relative to the sensor centre in m. Positive x0 moves the
+        beam towards higher column indices, positive y0 towards higher row
+        indices. Default 0.0 (centred).
 
     Returns
     -------
@@ -193,8 +199,9 @@ def render_frame(
     d_y = beam_diameter(z_m, beam.d0y_m, beam.z0y_m, beam.m2y, beam.wavelength_m)
     sigma_x, sigma_y = d_x / 4.0, d_y / 4.0
 
-    x_m = (np.arange(camera.nx) - (camera.nx - 1) / 2.0) * camera.pixel_size_m
-    y_m = (np.arange(camera.ny) - (camera.ny - 1) / 2.0) * camera.pixel_size_m
+    # Pixel-centre coordinates relative to the beam centre.
+    x_m = (np.arange(camera.nx) - (camera.nx - 1) / 2.0) * camera.pixel_size_m - x0_m
+    y_m = (np.arange(camera.ny) - (camera.ny - 1) / 2.0) * camera.pixel_size_m - y0_m
 
     # Peak counts per pixel so that the profile integrates to the total signal.
     total_counts = camera.signal_counts_per_ms * exposure_ms
