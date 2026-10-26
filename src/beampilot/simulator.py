@@ -29,6 +29,11 @@ class BeamParams:
         Waist positions along the propagation axis for x and y, in m.
     m2x, m2y : float
         Beam propagation ratios M² along x and y (dimensionless, >= 1).
+
+    Raises
+    ------
+    ValueError
+        If the wavelength or a waist diameter is not positive, or M² < 1.
     """
 
     wavelength_m: float
@@ -38,6 +43,15 @@ class BeamParams:
     z0y_m: float
     m2x: float
     m2y: float
+
+    def __post_init__(self) -> None:
+        # Written as "not x > limit" so that NaN is rejected too.
+        for name in ("wavelength_m", "d0x_m", "d0y_m"):
+            if not getattr(self, name) > 0:
+                raise ValueError(f"{name} must be > 0, got {getattr(self, name)}")
+        for name in ("m2x", "m2y"):
+            if not getattr(self, name) >= 1:
+                raise ValueError(f"{name} must be >= 1, got {getattr(self, name)}")
 
 
 @dataclass(frozen=True)
@@ -59,6 +73,11 @@ class CameraConfig:
     signal_counts_per_ms : float
         Brightness: total beam signal summed over an unbounded sensor, in
         counts per ms of exposure (before clipping).
+
+    Raises
+    ------
+    ValueError
+        If the pixel size is not positive or the bit depth is below 1.
     """
 
     pixel_size_m: float
@@ -68,6 +87,12 @@ class CameraConfig:
     offset_counts: float
     read_noise_counts: float
     signal_counts_per_ms: float
+
+    def __post_init__(self) -> None:
+        if not self.pixel_size_m > 0:
+            raise ValueError(f"pixel_size_m must be > 0, got {self.pixel_size_m}")
+        if not self.bit_depth >= 1:
+            raise ValueError(f"bit_depth must be >= 1, got {self.bit_depth}")
 
     @property
     def full_scale_counts(self) -> int:
@@ -155,7 +180,15 @@ def render_frame(
     -------
     ndarray of int32, shape (ny, nx)
         Pixel values in counts, clipped to ``[0, full_scale_counts]``.
+
+    Raises
+    ------
+    ValueError
+        If `exposure_ms` is not positive.
     """
+    if not exposure_ms > 0:
+        raise ValueError(f"exposure_ms must be > 0, got {exposure_ms}")
+
     d_x = beam_diameter(z_m, beam.d0x_m, beam.z0x_m, beam.m2x, beam.wavelength_m)
     d_y = beam_diameter(z_m, beam.d0y_m, beam.z0y_m, beam.m2y, beam.wavelength_m)
     sigma_x, sigma_y = d_x / 4.0, d_y / 4.0

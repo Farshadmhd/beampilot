@@ -97,6 +97,41 @@ def test_same_seed_gives_identical_frame() -> None:
     assert not np.array_equal(a, c)
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("wavelength_m", 0.0),
+        ("d0x_m", 0.0),
+        ("d0y_m", -1e-3),
+        ("m2x", 0.99),
+        ("m2y", float("nan")),
+    ],
+)
+def test_invalid_beam_params_raise(field: str, value: float) -> None:
+    with pytest.raises(ValueError, match=field):
+        replace(BEAM, **{field: value})
+
+
+def test_m2_of_one_is_valid() -> None:
+    beam = replace(BEAM, m2x=1.0, m2y=1.0)
+    assert beam.m2x == beam.m2y == 1.0
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("pixel_size_m", 0.0), ("pixel_size_m", -5e-6), ("bit_depth", 0)],
+)
+def test_invalid_camera_config_raises(field: str, value: float) -> None:
+    with pytest.raises(ValueError, match=field):
+        replace(CAMERA, **{field: value})
+
+
+@pytest.mark.parametrize("exposure_ms", [0.0, -1.0])
+def test_non_positive_exposure_raises(exposure_ms: float) -> None:
+    with pytest.raises(ValueError, match="exposure_ms"):
+        render_frame(BEAM, CAMERA, 0.2, exposure_ms, np.random.default_rng(0))
+
+
 def test_dark_frame_has_offset_and_read_noise() -> None:
     frame = dark_frame(CAMERA, np.random.default_rng(3))
     assert frame.shape == (CAMERA.ny, CAMERA.nx)
