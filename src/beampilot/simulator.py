@@ -1,0 +1,207 @@
+"""Simulated laser beam and camera.
+
+:class:`BeamParams` is the hidden ground truth: the agent never sees it, only
+the camera frames rendered from it. All lengths are in metres (SI). Beams with
+M² > 1 are modelled as an "embedded Gaussian", i.e. a Gaussian profile whose
+width follows the M² caustic. Frames have shape ``(ny, nx)``: rows are y,
+columns are x.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+import numpy as np
+from numpy.typing import NDArray
+
+
+@dataclass(frozen=True)
+class BeamParams:
+    """Ground-truth parameters of a beam with principal axes along x and y.
+
+    Parameters
+    ----------
+    wavelength_m : float
+        Wavelength in m.
+    d0x_m, d0y_m : float
+        Second-moment (4 sigma) waist diameters along x and y, in m.
+    z0x_m, z0y_m : float
+        Waist positions along the propagation axis for x and y, in m.
+    m2x, m2y : float
+        Beam propagation ratios M² along x and y (dimensionless, >= 1).
+    """
+
+    wavelength_m: float
+    d0x_m: float
+    d0y_m: float
+    z0x_m: float
+    z0y_m: float
+    m2x: float
+    m2y: float
+
+
+@dataclass(frozen=True)
+class CameraConfig:
+    """Simulated camera sensor.
+
+    Parameters
+    ----------
+    pixel_size_m : float
+        Pixel pitch in m (square pixels).
+    nx, ny : int
+        Number of pixels along x (columns) and y (rows).
+    bit_depth : int
+        ADC bit depth; full scale is ``2**bit_depth - 1`` counts.
+    offset_counts : float
+        Constant dark offset in counts.
+    read_noise_counts : float
+        Standard deviation of the Gaussian read noise in counts.
+    signal_counts_per_ms : float
+        Brightness: total beam signal summed over an unbounded sensor, in
+        counts per ms of exposure (before clipping).
+    """
+
+    pixel_size_m: float
+    nx: int
+    ny: int
+    bit_depth: int
+    offset_counts: float
+    read_noise_counts: float
+    signal_counts_per_ms: float
+
+    @property
+    def full_scale_counts(self) -> int:
+        """Largest pixel value in counts, ``2**bit_depth - 1``."""
+        return 2**self.bit_depth - 1
+
+
+def rayleigh_length(d0_m: float, m2: float, wavelength_m: float) -> float:
+    """Rayleigh length zR = pi * d0**2 / (4 * M² * wavelength).
+
+    Parameters
+    ----------
+    d0_m : float
+        Second-moment (4 sigma) waist diameter in m.
+    m2 : float
+        Beam propagation ratio M² (dimensionless).
+    wavelength_m : float
+        Wavelength in m.
+
+    Returns
+    -------
+    float
+        Rayleigh length in m.
+    """
+    return np.pi * d0_m**2 / (4.0 * m2 * wavelength_m)
+
+
+def beam_diameter(
+    z_m: float | NDArray[np.floating],
+    d0_m: float,
+    z0_m: float,
+    m2: float,
+    wavelength_m: float,
+) -> float | NDArray[np.floating]:
+    """Second-moment (4 sigma) beam diameter d(z) = d0 * sqrt(1 + ((z - z0)/zR)**2).
+
+    Parameters
+    ----------
+    z_m : float or ndarray
+        Position(s) along the propagation axis in m.
+    d0_m : float
+        Second-moment waist diameter in m.
+    z0_m : float
+        Waist position in m.
+    m2 : float
+        Beam propagation ratio M² (dimensionless).
+    wavelength_m : float
+        Wavelength in m.
+
+    Returns
+    -------
+    float or ndarray
+        Beam diameter in m, same shape as `z_m`.
+    """
+    z_r = rayleigh_length(d0_m, m2, wavelength_m)
+    return d0_m * np.sqrt(1.0 + ((z_m - z0_m) / z_r) ** 2)
+
+
+def render_frame(
+    beam: BeamParams,
+    camera: CameraConfig,
+    z_m: float,
+    exposure_ms: float,
+    rng: np.random.Generator,
+) -> NDArray[np.int32]:
+    """Render one camera frame of the beam, centred on the sensor.
+
+    The total beam signal is proportional to the exposure, so the peak pixel
+    value is highest near the waist and saturation happens there first.
+
+    Parameters
+    ----------
+    beam : BeamParams
+        Ground-truth beam.
+    camera : CameraConfig
+        Camera sensor.
+    z_m : float
+        Stage position along the propagation axis in m.
+    exposure_ms : float
+        Exposure time in ms.
+    rng : numpy.random.Generator
+        Random generator for the read noise.
+
+    Returns
+    -------
+    ndarray of int32, shape (ny, nx)
+        Pixel values in counts, clipped to ``[0, full_scale_counts]``.
+    """
+    d_x = beam_diameter(z_m, beam.d0x_m, beam.z0x_m, beam.m2x, beam.wavelength_m)
+    d_y = beam_diameter(z_m, beam.d0y_m, beam.z0y_m, beam.m2y, beam.wavelength_m)
+    sigma_x, sigma_y = d_x / 4.0, d_y / 4.0
+
+    x_m = (np.arange(camera.nx) - (camera.nx - 1) / 2.0) * camera.pixel_size_m
+    y_m = (np.arange(camera.ny) - (camera.ny - 1) / 2.0) * camera.pixel_size_m
+
+    # Peak counts per pixel so that the profile integrates to the total signal.
+    total_counts = camera.signal_counts_per_ms * exposure_ms
+    peak_counts = (
+        total_counts * camera.pixel_size_m**2 / (2.0 * np.pi * sigma_x * sigma_y)
+    )
+    profile = np.exp(
+        -0.5 * (x_m[np.newaxis, :] / sigma_x) ** 2
+        - 0.5 * (y_m[:, np.newaxis] / sigma_y) ** 2
+    )
+    return _digitise(peak_counts * profile, camera, rng)
+
+
+def dark_frame(camera: CameraConfig, rng: np.random.Generator) -> NDArray[np.int32]:
+    """Render a frame with no beam: offset plus read noise.
+
+    Parameters
+    ----------
+    camera : CameraConfig
+        Camera sensor.
+    rng : numpy.random.Generator
+        Random generator for the read noise.
+
+    Returns
+    -------
+    ndarray of int32, shape (ny, nx)
+        Pixel values in counts, clipped to ``[0, full_scale_counts]``.
+    """
+    return _digitise(np.zeros((camera.ny, camera.nx)), camera, rng)
+
+
+def _digitise(
+    signal_counts: NDArray[np.floating],
+    camera: CameraConfig,
+    rng: np.random.Generator,
+) -> NDArray[np.int32]:
+    """Add offset and read noise, round to integers, clip to the ADC range.
+
+    Returns signed integers so that later dark-frame subtraction cannot wrap.
+    """
+    noise = rng.normal(0.0, camera.read_noise_counts, size=signal_counts.shape)
+    counts = np.rint(signal_counts + camera.offset_counts + noise)
+    return np.clip(counts, 0, camera.full_scale_counts).astype(np.int32)
