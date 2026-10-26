@@ -204,6 +204,28 @@ class WidthResult:
     converged: bool
 
 
+@dataclass(frozen=True)
+class WidthStatistics:
+    """Mean and spread of beam widths over repeated frames at one position.
+
+    Parameters
+    ----------
+    d_x_mean_m, d_y_mean_m : float
+        Mean of d_x and d_y in m.
+    d_x_std_m, d_y_std_m : float
+        Sample standard deviation (ddof=1) of d_x and d_y in m; NaN for a
+        single frame.
+    n : int
+        Number of frames.
+    """
+
+    d_x_mean_m: float
+    d_x_std_m: float
+    d_y_mean_m: float
+    d_y_std_m: float
+    n: int
+
+
 def second_moments(image: ArrayLike, pixel_size_m: float, roi: Roi) -> Moments:
     """Centroid and second moments of the image inside a rectangular ROI.
 
@@ -323,6 +345,41 @@ def measure_widths(
         ellipticity=ellipticity,
         iterations=iteration,
         converged=converged,
+    )
+
+
+def width_statistics(results: Sequence[WidthResult]) -> WidthStatistics:
+    """Mean and sample standard deviation of d_x and d_y over repeats.
+
+    A failed frame (NaN width) makes the corresponding mean and std NaN, so a
+    bad repeat cannot go unnoticed.
+
+    Parameters
+    ----------
+    results : sequence of WidthResult
+        Width results of repeated frames at one stage position.
+
+    Returns
+    -------
+    WidthStatistics
+        Means and standard deviations in m.
+
+    Raises
+    ------
+    ValueError
+        If `results` is empty.
+    """
+    if len(results) == 0:
+        raise ValueError("need at least one width result")
+    d_x = np.array([r.d_x_m for r in results])
+    d_y = np.array([r.d_y_m for r in results])
+    n = len(results)
+    return WidthStatistics(
+        d_x_mean_m=float(d_x.mean()),
+        d_x_std_m=float(d_x.std(ddof=1)) if n > 1 else np.nan,
+        d_y_mean_m=float(d_y.mean()),
+        d_y_std_m=float(d_y.std(ddof=1)) if n > 1 else np.nan,
+        n=n,
     )
 
 

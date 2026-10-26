@@ -12,7 +12,12 @@ from beampilot.simulator import (
     dark_frame,
     render_frame,
 )
-from beampilot.widths import mean_dark, measure_widths, subtract_background
+from beampilot.widths import (
+    mean_dark,
+    measure_widths,
+    subtract_background,
+    width_statistics,
+)
 
 # Astigmatic test beam: different waist sizes, positions and M² per axis.
 BEAM = BeamParams(
@@ -121,6 +126,51 @@ def test_iteration_converges_before_max_iter() -> None:
     result = measure_widths(image, PIXEL_M, max_iter=25)
     assert result.converged
     assert result.iterations < 25
+
+
+def test_realistic_frames_mean_of_five_repeats() -> None:
+    dark = mean_dark(_darks(CAMERA, 10, seed=0))
+    rng = np.random.default_rng(1)
+    results = []
+    for _ in range(5):
+        frame = render_frame(BEAM, CAMERA, Z_M, EXPOSURE_MS, rng)
+        image, _ = subtract_background(frame, dark)
+        results.append(measure_widths(image, PIXEL_M))
+
+    stats = width_statistics(results)
+    true_x, true_y = _true_diameters(BEAM, Z_M)
+    assert stats.n == 5
+    assert stats.d_x_mean_m == pytest.approx(true_x, rel=0.02)
+    assert stats.d_y_mean_m == pytest.approx(true_y, rel=0.02)
+    assert 0 < stats.d_x_std_m < 0.02 * true_x
+    assert 0 < stats.d_y_std_m < 0.02 * true_y
+
+
+def test_skipping_fine_offset_makes_beam_look_larger() -> None:
+    """Negative control: why the corner offset correction matters."""
+    dark = mean_dark(_darks(CAMERA, 10, seed=0))
+    # Background 3 counts higher than in the dark frames (0.1 % of the peak).
+    brighter = replace(CAMERA, offset_counts=CAMERA.offset_counts + 3.0)
+    frame = render_frame(BEAM, brighter, Z_M, EXPOSURE_MS, np.random.default_rng(1))
+    true_x, true_y = _true_diameters(BEAM, Z_M)
+
+    dark_only = measure_widths(frame - dark, PIXEL_M)
+    corrected_image, _ = subtract_background(frame, dark)
+    corrected = measure_widths(corrected_image, PIXEL_M)
+
+    assert dark_only.d_x_m > 1.15 * true_x
+    assert dark_only.d_y_m > 1.15 * true_y
+    assert corrected.d_x_m == pytest.approx(true_x, rel=0.02)
+    assert corrected.d_y_m == pytest.approx(true_y, rel=0.02)
+
+
+def test_width_statistics_single_and_empty() -> None:
+    image = _rotated_ellipse(40.0, 20.0, 0.0)
+    single = width_statistics([measure_widths(image, PIXEL_M)])
+    assert single.n == 1
+    assert np.isnan(single.d_x_std_m)
+    with pytest.raises(ValueError):
+        width_statistics([])
 
 
 @pytest.mark.parametrize("level", [0.0, -1.0])
