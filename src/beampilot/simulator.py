@@ -67,12 +67,15 @@ class CameraConfig:
     bit_depth : int
         ADC bit depth; full scale is ``2**bit_depth - 1`` counts.
     offset_counts : float
-        Constant dark offset in counts.
+        Constant dark offset in counts. Keep ``offset_counts >= 4 *
+        read_noise_counts``: pixel values are clipped at 0, so a smaller offset
+        biases the background upwards.
     read_noise_counts : float
         Standard deviation of the Gaussian read noise in counts.
     signal_counts_per_ms : float
         Brightness: total beam signal summed over an unbounded sensor, in
-        counts per ms of exposure (before clipping).
+        counts per ms of exposure (before clipping). A beam larger than the
+        sensor is truncated, not rescaled: signal outside the sensor is lost.
     shot_noise : bool, optional
         If True (default), apply Poisson shot noise to the beam signal. Assumes
         a gain of one count per photo-electron.
@@ -167,7 +170,9 @@ def render_frame(
     """Render one camera frame of the beam.
 
     The total beam signal is proportional to the exposure, so the peak pixel
-    value is highest near the waist and saturation happens there first.
+    value is highest near the waist and saturation happens there first. Parts
+    of the beam outside the sensor are truncated, not rescaled, so the frame
+    sum drops when the beam outgrows the sensor (ISO clipping loss).
 
     Parameters
     ----------
