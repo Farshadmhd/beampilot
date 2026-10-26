@@ -33,6 +33,7 @@ CAMERA = CameraConfig(
     read_noise_counts=5.0,
     signal_counts_per_ms=1e6,
 )
+NOISELESS = replace(CAMERA, offset_counts=0.0, read_noise_counts=0.0)
 
 
 def _second_moment_diameters(
@@ -63,16 +64,26 @@ def test_diameter_one_rayleigh_length_from_waist() -> None:
 
 
 def test_noiseless_frame_matches_diameters() -> None:
-    camera = replace(CAMERA, offset_counts=0.0, read_noise_counts=0.0)
     z_m = 0.25  # away from both waists, so d_x and d_y differ clearly
-    frame = render_frame(BEAM, camera, z_m, 20.0, np.random.default_rng(0))
-    assert frame.max() < camera.full_scale_counts  # unsaturated
+    frame = render_frame(BEAM, NOISELESS, z_m, 20.0, np.random.default_rng(0))
+    assert frame.max() < NOISELESS.full_scale_counts  # unsaturated
 
-    d_x, d_y = _second_moment_diameters(frame, camera.pixel_size_m)
+    d_x, d_y = _second_moment_diameters(frame, NOISELESS.pixel_size_m)
     expected_x = beam_diameter(z_m, BEAM.d0x_m, BEAM.z0x_m, BEAM.m2x, BEAM.wavelength_m)
     expected_y = beam_diameter(z_m, BEAM.d0y_m, BEAM.z0y_m, BEAM.m2y, BEAM.wavelength_m)
     assert d_x == pytest.approx(expected_x, rel=0.01)
     assert d_y == pytest.approx(expected_y, rel=0.01)
+
+
+def test_frame_sum_is_proportional_to_exposure() -> None:
+    z_m = 0.25  # beam edge is > 7 sigma from the sensor edge: nothing truncated
+    single = render_frame(BEAM, NOISELESS, z_m, 5.0, np.random.default_rng(0))
+    double = render_frame(BEAM, NOISELESS, z_m, 10.0, np.random.default_rng(0))
+    assert double.max() < NOISELESS.full_scale_counts  # both unsaturated
+
+    expected = NOISELESS.signal_counts_per_ms * 5.0
+    assert single.sum() == pytest.approx(expected, rel=0.005)
+    assert double.sum() == pytest.approx(2.0 * single.sum(), rel=0.005)
 
 
 def test_saturation_depends_on_exposure_and_position() -> None:
