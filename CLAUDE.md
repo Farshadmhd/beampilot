@@ -48,6 +48,6 @@ agent and SAM 3.1 for beam segmentation.
 - Do not change the PowerShell execution policy without asking.
 
 ## Communication
-- Explain each step to the maintainer in Persian (one or two sentences per
-  step), keeping technical terms in English.
+- Explain each step to the maintainer in English (one or two sentences per
+  step).
 - All code, comments, commit messages and docs are in English.
