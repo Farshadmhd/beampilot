@@ -79,8 +79,8 @@ def test_noiseless_frame_matches_diameters() -> None:
     d_x, d_y = _second_moment_diameters(frame, NOISELESS.pixel_size_m)
     expected_x = beam_diameter(z_m, BEAM.d0x_m, BEAM.z0x_m, BEAM.m2x, BEAM.wavelength_m)
     expected_y = beam_diameter(z_m, BEAM.d0y_m, BEAM.z0y_m, BEAM.m2y, BEAM.wavelength_m)
-    assert d_x == pytest.approx(expected_x, rel=0.01)
-    assert d_y == pytest.approx(expected_y, rel=0.01)
+    assert d_x == pytest.approx(expected_x, rel=0.002)
+    assert d_y == pytest.approx(expected_y, rel=0.002)
 
 
 def test_frame_sum_is_proportional_to_exposure() -> None:
