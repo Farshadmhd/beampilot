@@ -522,9 +522,44 @@ def test_waist_outside_stage_range_is_reported() -> None:
     result = evaluate(session, "where is the waist?")
     assert result["status"] == "ok"
     for axis in ("x", "y"):
-        assert result[axis]["z0_mm"] < 0
-        assert not result[axis]["waist_in_stage_range"]
+        axis_result = result[axis]
+        assert not axis_result["waist_in_stage_range"]
+        # Extrapolated waist: no collapsed numbers, a reason instead.
+        for key in ("m2", "d0_um", "z0_mm", "z_r_mm"):
+            assert axis_result[key] is None, key
+        assert "below the measured range" in axis_result["not_determined"]
+        assert axis_result["waist_side"] == "below"
+        assert axis_result["theta_mrad"] > 0  # the far-field slope is measured
+        assert axis_result["coverage"] is None
+        assert not axis_result["m2_below_1"]
     assert not result["iso_coverage_met"]
+    report = finish(session, "waist_not_accessible", "waist before the stage")
+    assert report["report"]["evaluation"]["x"]["m2"] is None
+
+
+def test_failed_fit_shows_no_numbers() -> None:
+    fit = CausticFit(
+        d0_m=1e-9,
+        d0_std_m=np.nan,
+        z0_m=0.12,
+        z0_std_m=np.nan,
+        theta_rad=8e-3,
+        theta_std_rad=np.nan,
+        z_r_m=1e-7,
+        z_r_std_m=np.nan,
+        m2=0.001,
+        m2_std=np.nan,
+        residual_rms=0.1,
+        n_points=4,
+        success=False,
+    )
+    session = MeasurementSession(clean_scenario())
+    result = tools._axis_result(session, "x", np.linspace(0.05, 0.2, 4), fit)
+    assert result["not_determined"] == "caustic fit failed"
+    for key in ("m2", "d0_um", "z0_mm", "z_r_mm", "theta_mrad"):
+        assert result[key] is None, key
+    assert result["waist_in_stage_range"] is None
+    assert result["coverage"] is None
 
 
 def test_different_xy_waists_fitted_per_axis() -> None:

@@ -447,7 +447,10 @@ def evaluate(session: MeasurementSession, reason: str) -> dict[str, Any]:
     dict
         ``status`` ``"ok"`` with ``x`` and ``y`` results (d0 in um, z0 and zR
         in mm, theta in mrad, M², each with std; coverage counts and text;
-        waist in range; M² < 1 flag), ``iso_coverage_met``,
+        waist in range; M² < 1 flag; d0, z0, zR and M² are None with a
+        ``not_determined`` reason if the fit failed or its waist lies outside
+        the measured z range, and ``waist_side`` then says whether it lies
+        below or above that range), ``iso_coverage_met``,
         ``general_astigmatism``, ``axes_not_aligned`` and ``table``; or
         ``status`` ``"not_enough_data"`` with a message and the table.
     """
@@ -560,10 +563,34 @@ def _evaluation(session: MeasurementSession) -> dict[str, Any]:
 def _axis_result(
     session: MeasurementSession, axis: str, z: np.ndarray, fit: CausticFit
 ) -> dict[str, Any]:
-    """One axis of the evaluation in display units, with coverage."""
+    """One axis of the evaluation in display units, with coverage.
+
+    d0, z0, zR and M² are reported only if the fit succeeded and its waist
+    lies inside the measured z range; otherwise they are None and
+    ``not_determined`` says why. A waist outside the measured range is an
+    extrapolation that can collapse (d0 -> 0, M² -> 0), so no number is
+    shown for it.
+    """
     scenario = session.scenario
+    z_lo, z_hi = float(z.min()), float(z.max())
+    not_determined = None
+    side = None
+    if not fit.success:
+        not_determined = "caustic fit failed"
+    elif not z_lo <= fit.z0_m <= z_hi:
+        side = "below" if fit.z0_m < z_lo else "above"
+        limit = z_lo if fit.z0_m < z_lo else z_hi
+        not_determined = (
+            f"the fit puts the waist {side} the measured range (beyond "
+            f"{limit * 1e3:.1f} mm): d0, z0, zR and M² would be extrapolated"
+        )
+    determined = not_determined is None
+
+    def shown(value: float, digits: int) -> float | None:
+        return _num(value, digits) if determined else None
+
     coverage_result = None
-    if fit.success and np.isfinite(fit.z_r_m) and fit.z_r_m > 0:
+    if determined and np.isfinite(fit.z_r_m) and fit.z_r_m > 0:
         cov = coverage(z, fit.z0_m, fit.z_r_m)
         coverage_result = {
             "near": cov.n_near,
@@ -575,25 +602,35 @@ def _axis_result(
                 f"{cov.n_far} beyond 2 zR, need 5"
             ),
         }
+    # The far-field slope is measured even when the waist is extrapolated.
+    theta_shown = fit.success
     return {
         "fit_success": fit.success,
-        "d0_um": _num(fit.d0_m * 1e6, 2),
-        "d0_std_um": _num(fit.d0_std_m * 1e6, 2),
-        "z0_mm": _num(fit.z0_m * 1e3, 3),
-        "z0_std_mm": _num(fit.z0_std_m * 1e3, 3),
-        "theta_mrad": _num(fit.theta_rad * 1e3, 4),
-        "theta_std_mrad": _num(fit.theta_std_rad * 1e3, 4),
-        "z_r_mm": _num(fit.z_r_m * 1e3, 3),
-        "z_r_std_mm": _num(fit.z_r_std_m * 1e3, 3),
-        "m2": _num(fit.m2, 4),
-        "m2_std": _num(fit.m2_std, 4),
+        "not_determined": not_determined,
+        # "below" / "above" the measured z range when the waist is
+        # extrapolated: where to measure next. None otherwise.
+        "waist_side": side,
+        "d0_um": shown(fit.d0_m * 1e6, 2),
+        "d0_std_um": shown(fit.d0_std_m * 1e6, 2),
+        "z0_mm": shown(fit.z0_m * 1e3, 3),
+        "z0_std_mm": shown(fit.z0_std_m * 1e3, 3),
+        "theta_mrad": _num(fit.theta_rad * 1e3, 4) if theta_shown else None,
+        "theta_std_mrad": _num(fit.theta_std_rad * 1e3, 4) if theta_shown else None,
+        "z_r_mm": shown(fit.z_r_m * 1e3, 3),
+        "z_r_std_mm": shown(fit.z_r_std_m * 1e3, 3),
+        "m2": shown(fit.m2, 4),
+        "m2_std": shown(fit.m2_std, 4),
         "residual_rms_percent": _num(fit.residual_rms * 100, 3),
         "coverage": coverage_result,
-        "waist_in_stage_range": bool(
-            scenario.stage_min_m <= fit.z0_m <= scenario.stage_max_m
+        # From the fitted waist position even when it is extrapolated: that
+        # is exactly how a waist outside the stage shows up. None if no fit.
+        "waist_in_stage_range": (
+            bool(scenario.stage_min_m <= fit.z0_m <= scenario.stage_max_m)
+            if fit.success
+            else None
         ),
         # M² < 1 is unphysical; flag it only if it holds beyond 2 sigma.
-        "m2_below_1": bool(fit.success and fit.m2 + 2.0 * fit.m2_std < 1.0),
+        "m2_below_1": bool(determined and fit.m2 + 2.0 * fit.m2_std < 1.0),
     }
 
 
