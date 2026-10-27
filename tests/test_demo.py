@@ -1,6 +1,8 @@
 """Tests for the demo pieces: replay, plots and the Gradio app (not launched)."""
 
 import json
+import threading
+import time
 from types import SimpleNamespace
 
 import numpy as np
@@ -129,6 +131,7 @@ def test_fault_button_reaches_a_running_session() -> None:
     request = SimpleNamespace(session_hash="test-fault")
     browser = demo_app._browser(request)
     browser.session = MeasurementSession(clean_scenario())
+    browser.active = True  # as during a live run
     message = demo_app.inject_fault(request, "laser_power")
     assert "x3" in message
     browser.session.take_frames(0.1, 0.1)
@@ -150,3 +153,144 @@ def test_build_app_without_launching() -> None:
     pytest.importorskip("gradio")
     app = demo_app.build_app()
     assert app is not None
+
+
+# Robustness and limits of the live path (review findings)
+
+
+@pytest.fixture(autouse=True)
+def fresh_global_budget(monkeypatch):
+    monkeypatch.setattr(demo_app, "_GLOBAL", demo_app.GlobalBudget())
+
+
+def _slow_client(n=20, delay=0.15) -> FakeClient:
+    def slow():
+        time.sleep(delay)
+        return _response(_call("get_setup"))
+
+    return FakeClient([slow] * n)
+
+
+def _wait_until_idle(browser, timeout=15.0) -> None:
+    end = time.monotonic() + timeout
+    while browser.active and time.monotonic() < end:
+        time.sleep(0.05)
+    assert not browser.active, "worker did not finish"
+
+
+def test_closing_the_tab_cancels_and_still_accounts(monkeypatch, tmp_path) -> None:
+    client = _slow_client()
+    monkeypatch.setattr(demo_app, "_client", lambda: client)
+    monkeypatch.setattr(demo_app, "LIVE_RUNS_DIR", tmp_path)
+    request = SimpleNamespace(session_hash="test-close")
+    demo_app._BROWSERS.pop("test-close", None)
+    stream = demo_app.live_run("clean", 0, "", request)
+    next(stream)  # the first model reply arrived
+    stream.close()  # the browser went away
+    browser = demo_app._browser(request)
+    _wait_until_idle(browser)
+    assert len(client.requests) < 20  # stopped early, not run to the end
+    assert browser.tokens > 0  # counted in the worker, per reply
+    assert browser.session.report["stopped_by_limit"] == "cancelled by the controller"
+    assert len(list(tmp_path.glob("*.json"))) == 1
+    assert demo_app._GLOBAL.active == 0
+
+
+def test_parallel_starts_in_one_tab_run_only_once(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(demo_app, "_client", lambda: _slow_client(n=6, delay=0.2))
+    monkeypatch.setattr(demo_app, "LIVE_RUNS_DIR", tmp_path)
+    request = SimpleNamespace(session_hash="test-race")
+    demo_app._BROWSERS.pop("test-race", None)
+    results = []
+
+    def start():
+        results.append(list(demo_app.live_run("clean", 0, "", request)))
+
+    threads = [threading.Thread(target=start) for _ in range(4)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=30)
+    refused = [r for r in results if "already in progress" in r[-1][2]]
+    assert len(refused) == 3
+    assert demo_app._browser(request).runs == 1
+
+
+def test_process_wide_cap_holds_for_new_session_ids(monkeypatch) -> None:
+    monkeypatch.setattr(demo_app._GLOBAL, "runs", demo_app.GLOBAL_MAX_RUNS)
+    for session_id in ("invented-1", "invented-2"):
+        request = SimpleNamespace(session_hash=session_id)
+        update = next(demo_app.live_run("clean", 0, "", request))
+        assert "used up its live runs" in update[2]
+    monkeypatch.setattr(demo_app._GLOBAL, "runs", 0)
+    monkeypatch.setattr(demo_app._GLOBAL, "active", demo_app.MAX_CONCURRENT_RUNS)
+    update = next(demo_app.live_run("clean", 0, "", SimpleNamespace(session_hash="x")))
+    assert "busy" in update[2]
+
+
+def test_exception_outside_the_agent_loop_still_reports(monkeypatch, tmp_path) -> None:
+    broken = SimpleNamespace(
+        id="r", status="completed", output=None, output_text="", usage=None
+    )
+    client = FakeClient([_response(_call("get_setup")), broken])
+    monkeypatch.setattr(demo_app, "_client", lambda: client)
+    monkeypatch.setattr(demo_app, "LIVE_RUNS_DIR", tmp_path)
+    request = SimpleNamespace(session_hash="test-broken")
+    demo_app._BROWSERS.pop("test-broken", None)
+    *_, (plot, image, budget, log, report, truth) = demo_app.live_run(
+        "clean", 0, "", request
+    )
+    assert report["verdict"] == "measurement_failed"
+    assert report["stopped_by_limit"] == "controller error (TypeError)"
+    browser = demo_app._browser(request)
+    assert browser.tokens > 0 and not browser.active
+    assert list(tmp_path.glob("*.json"))
+    assert demo_app.reveal_live(request)["m2_x"] == 1.2
+
+
+def test_api_error_text_never_reaches_ui_report_or_file(monkeypatch, tmp_path) -> None:
+    class AuthenticationError(Exception):
+        status_code = 401
+
+    def fail():
+        raise AuthenticationError("Incorrect API key provided: sk-SECRET**1234")
+
+    monkeypatch.setattr(demo_app, "_client", lambda: FakeClient([fail]))
+    monkeypatch.setattr(demo_app, "LIVE_RUNS_DIR", tmp_path)
+    request = SimpleNamespace(session_hash="test-secret")
+    demo_app._BROWSERS.pop("test-secret", None)
+    updates = list(demo_app.live_run("clean", 0, "", request))
+    shown = json.dumps(updates[-1][2:], default=str)
+    assert "SECRET" not in shown
+    assert "AuthenticationError (HTTP 401)" in shown
+    for path in tmp_path.glob("*.json"):
+        assert "SECRET" not in path.read_text(encoding="utf-8")
+
+
+def test_bad_uploads_give_a_message_not_a_crash(saved_run, tmp_path) -> None:
+    broken = tmp_path / "broken.json"
+    broken.write_text(json.dumps({"steps": [{"tool_calls": [{"x": 1}]}]}), "utf-8")
+    title = list(demo_app.replay(None, str(broken), 0.0))[-1][0]
+    assert "Cannot replay this file" in title
+
+    huge = json.loads(saved_run.read_text(encoding="utf-8"))
+    huge["scenario_params"]["camera"]["nx"] = 20000  # would need GBs
+    huge_path = tmp_path / "huge.json"
+    huge_path.write_text(json.dumps(huge), "utf-8")
+    last = list(demo_app.replay(None, str(huge_path), 0.0))[-1]
+    assert last[2] is None  # no frame rendered
+    assert last[5]["verdict"] == "estimate_not_compliant"
+
+
+def test_closing_the_tab_forgets_the_browser_state() -> None:
+    request = SimpleNamespace(session_hash="test-unload")
+    browser = demo_app._browser(request)
+    demo_app._forget_browser(request)
+    assert browser.cancel.is_set()
+    assert "test-unload" not in demo_app._BROWSERS
+
+
+def test_bad_seed_or_scenario_is_refused() -> None:
+    request = SimpleNamespace(session_hash="test-input")
+    assert "between 0 and" in next(demo_app.live_run("clean", -3, "", request))[2]
+    assert "Unknown scenario" in next(demo_app.live_run("nope", 0, "", request))[2]
