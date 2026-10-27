@@ -31,10 +31,15 @@ NAIVE_POSITIONS = 10
 NAIVE_EXPOSURE_MS = 1.0  # a mid-range exposure for this camera, not tuned
 
 SCOUT_FRACTIONS = (0.125, 0.375, 0.625, 0.875)  # of the stage range
-TARGET_PEAK_FRACTION = 0.6  # aim below full scale so one halving suffices
-MAX_TRIES = 3  # exposure changes per position
+TARGET_PEAK_FRACTION = 0.7  # aimed peak, as a fraction of full scale
+START_EXPOSURE_MS = 1.0  # first exposure before anything is known
+MAX_EXPOSURE_STEP = 50.0  # largest exposure increase per retry
+MAX_TRIES = 3  # measurements per position
 NEAR_OFFSETS = (-0.8, -0.4, 0.0, 0.4, 0.8)  # in zR
-FAR_OFFSETS = (2.1, -2.1, 2.4, -2.4, 2.7, -2.7, 3.0, -3.0, 3.5, -3.5, 4.0, -4.0)
+# Far points start at 2.3 zR so a refit (zR shifts by a few %) keeps them
+# beyond 2 zR; existing points count as far from FAR_COUNT_ZR when planning.
+FAR_OFFSETS = (2.3, -2.3, 2.6, -2.6, 2.9, -2.9, 3.2, -3.2, 3.6, -3.6, 4.0, -4.0)
+FAR_COUNT_ZR = 2.2
 MIN_SPACING_ZR = 0.15  # skip planned positions closer than this to others
 # A planned position is skipped if the predicted d exceeds this fraction of the
 # smaller sensor side (0.5: sensor edges beyond +-4 sigma, clipping < 0.02 %).
@@ -122,13 +127,16 @@ def scripted_iso(session: MeasurementSession) -> dict[str, Any]:
     1. Scout 4 positions spread over the stage. A scout rejected for a reason
        exposure cannot fix is replaced by a point halfway towards the
        smallest beam seen.
-    2. At every position: halve the exposure on ``saturated``, double it on
-       ``low_signal`` (at most 3 tries); retake darks on
+    2. At every position: on ``saturated`` or ``low_signal`` set the next
+       exposure from the measured peak (target 70 % of full scale; for a
+       saturated frame the peak is estimated from the saturated area), at
+       most 3 measurements per position; retake darks on
        ``background_changed`` and measure again. The first exposure at a new
        position is scaled from a good earlier measurement and the predicted
        beam size.
     3. Evaluate, then per axis place up to 5 positions within +-zR and 5
-       beyond 2 zR that are still missing, skipping positions off the stage
+       beyond 2 zR (aimed at >= 2.3 zR, so a refit keeps them beyond 2 zR)
+       that are still missing, skipping positions off the stage
        or where the predicted d exceeds half the sensor. Repeat once if
        coverage is still short.
     4. Reject every measurement with a reject reason or ``beam_in_corners``;
@@ -176,6 +184,7 @@ class _ScriptedOperator:
         self.good: list[dict[str, Any]] = []  # accepted measure_at results
         self.measured_z: list[float] = []
         self.fit: dict[str, Any] | None = None
+        self.exposure_hint = START_EXPOSURE_MS
 
     def scout(self) -> None:
         """Measure 4 scout positions; refill towards the smallest beam.
@@ -244,7 +253,7 @@ class _ScriptedOperator:
             z0, z_r = result["z0_mm"], result["z_r_mm"]
             for offsets, low, high, out in (
                 (NEAR_OFFSETS, 0.0, 1.0, near),
-                (FAR_OFFSETS, 2.0, np.inf, far),
+                (FAR_OFFSETS, FAR_COUNT_ZR, np.inf, far),
             ):
                 planned = taken + near + far
                 have = sum(low <= abs(z - z0) / z_r <= high for z in planned)
@@ -290,13 +299,11 @@ class _ScriptedOperator:
                 # No exposure fixes this position: do not spend retries on it.
                 self._reject(result, "Beam too large for the sensor here.")
                 return result
-            if flags["saturated"]:
-                self._reject(result, "Saturated: halve the exposure.")
-                exposure = self._clamp(exposure / 2.0)
-                continue
-            if flags["low_signal"]:
-                self._reject(result, "Low signal: double the exposure.")
-                exposure = self._clamp(exposure * 2.0)
+            if flags["saturated"] or flags["low_signal"]:
+                exposure = self._exposure_after(result, exposure)
+                self.exposure_hint = exposure
+                problem = "saturated" if flags["saturated"] else "low signal"
+                self._reject(result, f"{problem.capitalize()}: retry at {exposure} ms.")
                 continue
             cautious = [f for f in CAUTIOUS_REJECT_FLAGS if flags[f]]
             if result["suggested_verdict"] == "reject" or cautious:
@@ -309,10 +316,41 @@ class _ScriptedOperator:
             return result
         return None
 
+    def _exposure_after(self, result: dict[str, Any], exposure: float) -> float:
+        """Next exposure from the measured peak, aiming at 70 % of full scale.
+
+        Peak counts scale with exposure. A saturated peak is clipped, so the
+        true peak is estimated from the saturated area instead: for a
+        Gaussian the pixels above full scale fill the ellipse where
+        peak * exp(-r²/2σ²) > full scale, so
+        peak / full scale = exp(N_sat p² / (2 pi σx σy)). Saturated frames
+        have biased widths, so the step is at least a factor 2 down.
+        """
+        target = TARGET_PEAK_FRACTION * self.full_scale
+        if result["flags"]["saturated"]:
+            nx, ny = self.setup["sensor_px"]
+            n_saturated = result["details"]["saturated_pixel_fraction"] * nx * ny
+            pixel_um = self.setup["pixel_size_um"]
+            sigma_x = result["d_x_um"]["mean"] / 4.0
+            sigma_y = result["d_y_um"]["mean"] / 4.0
+            if sigma_x and sigma_y:
+                exponent = n_saturated * pixel_um**2 / (2 * np.pi * sigma_x * sigma_y)
+                peak = self.full_scale * float(np.exp(min(exponent, 50.0)))
+            else:
+                peak = 2.0 * self.full_scale
+            factor = min(target / peak, 0.5)
+        else:
+            peak = result["details"]["peak_counts"] or 0.0
+            # Noise alone gives a peak of a few tens of counts: cap the step.
+            factor = target / peak if peak > 0 else MAX_EXPOSURE_STEP
+            factor = min(factor, MAX_EXPOSURE_STEP)
+        return self._clamp(exposure * factor)
+
     def _first_exposure(self, z_mm: float) -> float:
         """Exposure guess for a new position from a good earlier measurement."""
         if not self.good:
-            return self._clamp(1.0)
+            # Nothing good yet: use the last suggested exposure, if any.
+            return self._clamp(self.exposure_hint)
         reference = min(self.good, key=lambda r: abs(r["z_mm"] - z_mm))
         scale = (
             TARGET_PEAK_FRACTION * self.full_scale / reference["details"]["peak_counts"]
