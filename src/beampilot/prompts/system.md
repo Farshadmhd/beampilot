@@ -128,7 +128,8 @@ stage end.
 - `waist_not_accessible`: `waist_accessibility` is `outside` for an axis (its
   waist lies outside the stage range even at ± 2σ) after you measured as close as
   possible to that stage end, so near-waist positions cannot be measured. Not for
-  `uncertain`.
+  `uncertain`. The tool refuses this verdict until an accepted position lies
+  within 5 % of the stage length from that stage end.
 - `general_astigmatism_out_of_scope`: the beam shows general astigmatism.
 - `measurement_failed`: no usable measurement was possible.
 
