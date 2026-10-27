@@ -74,6 +74,38 @@ def _rotated_ellipse(
     )
 
 
+@pytest.mark.parametrize(
+    "roi", [Roi(0, 512, 0, 512), Roi(18, 453, 89, 408)], ids=["full", "8sigma"]
+)
+def test_second_moments_of_analytic_gaussian(roi: Roi) -> None:
+    """Rotated, off-centre Gaussian sampled at pixel centres.
+
+    Expected: centroid (x0, y0); sigma_x² = a² cos² + b² sin²,
+    sigma_y² = a² sin² + b² cos², sigma_xy = (a² - b²) sin cos; sum = 2 pi a b A.
+    Projected sigmas are 27.0 px (x) and 19.8 px (y); both ROIs reach at least
+    8 sigma from the centroid, and sampling at >= 15 px sigma is exact for a
+    Gaussian, so both effects stay far below 1e-9 relative.
+    """
+    n, peak = 512, 1000.0
+    a_px, b_px, angle = 30.0, 15.0, np.radians(30.0)
+    x0_px, y0_px = -20.3, -7.6  # relative to the image centre
+    y, x = np.indices((n, n)) - (n - 1) / 2.0
+    u = (x - x0_px) * np.cos(angle) + (y - y0_px) * np.sin(angle)
+    v = -(x - x0_px) * np.sin(angle) + (y - y0_px) * np.cos(angle)
+    image = peak * np.exp(-0.5 * (u / a_px) ** 2 - 0.5 * (v / b_px) ** 2)
+
+    moments = second_moments(image, PIXEL_M, roi)
+
+    c, s = np.cos(angle), np.sin(angle)
+    p2 = PIXEL_M**2
+    assert moments.x_c_m == pytest.approx(x0_px * PIXEL_M, rel=1e-9)
+    assert moments.y_c_m == pytest.approx(y0_px * PIXEL_M, rel=1e-9)
+    assert moments.var_x_m2 == pytest.approx((a_px**2 * c**2 + b_px**2 * s**2) * p2)
+    assert moments.var_y_m2 == pytest.approx((a_px**2 * s**2 + b_px**2 * c**2) * p2)
+    assert moments.cov_xy_m2 == pytest.approx((a_px**2 - b_px**2) * s * c * p2)
+    assert moments.total_counts == pytest.approx(2 * np.pi * a_px * b_px * peak)
+
+
 def test_noiseless_centred_beam() -> None:
     frame = render_frame(BEAM, NOISELESS, Z_M, EXPOSURE_MS, np.random.default_rng(0))
     result = measure_widths(frame, PIXEL_M)
