@@ -212,6 +212,31 @@ def test_dim_noisy_frames_all_converge() -> None:
         assert np.isfinite(result.d_x_m) and np.isfinite(result.d_y_m)
 
 
+def test_small_beam_with_residual_offset_is_measured() -> None:
+    """A 200 um beam holds only ~3e6 counts at 70 % of full scale.
+
+    A residual offset of ~0.2 counts (the corner estimate's standard error is
+    ~0.15) summed with r² weights over the full sensor outweighs the beam's
+    sigma², so a full-image first pass gave negative second moments on
+    several of these frames. The 1/e² start area avoids that.
+    """
+    small = replace(BEAM, d0x_m=0.2e-3, d0y_m=0.2e-3, z0x_m=0.0, z0y_m=0.0)
+    small = replace(small, m2x=1.0, m2y=1.0)
+    exposure_ms = 1.5  # peak ~ 2900 counts
+    dark = mean_dark(_darks(CAMERA, 10, seed=0))
+    rng = np.random.default_rng(7)
+    results = []
+    for _ in range(20):
+        frame = render_frame(small, CAMERA, 0.0, exposure_ms, rng)
+        image, _ = subtract_background(frame, dark)
+        result = measure_widths(image, PIXEL_M)
+        assert result.converged and not result.roi_clipped
+        results.append(result)
+    stats = width_statistics(results)
+    assert stats.d_x_mean_m == pytest.approx(0.2e-3, rel=0.01)
+    assert stats.d_y_mean_m == pytest.approx(0.2e-3, rel=0.01)
+
+
 def test_realistic_frames_mean_of_five_repeats() -> None:
     dark = mean_dark(_darks(CAMERA, 10, seed=0))
     rng = np.random.default_rng(1)

@@ -15,6 +15,9 @@ import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
 MIN_DARK_FRAMES = 10
+# Pixels above this fraction of the peak (1/e²) define the first integration
+# area; they only choose where the ISO iteration starts.
+START_THRESHOLD = np.exp(-2.0)
 
 
 @dataclass(frozen=True)
@@ -318,9 +321,14 @@ def measure_widths(
 ) -> WidthResult:
     """ISO 11146-1 second-moment beam widths with an iterated integration area.
 
-    The first pass uses the whole image. Each further pass uses a rectangle
-    centred on the last centroid, 3 * d_x wide and 3 * d_y high (clipped to
-    the image), until d_x and d_y both change by less than `rtol`, or until
+    The first pass uses a 3 * d rectangle estimated from the pixels above
+    1/e² of the peak (their centroid and 4 sigma widths). The whole image is
+    not used: for a small beam, a residual offset of a fraction of a count,
+    weighted by the squared distance over the full sensor, outweighs the beam
+    and can make the second moments negative. If no such estimate is possible
+    the first pass falls back to the whole image. Each further pass uses a
+    rectangle centred on the last centroid, 3 * d_x wide and 3 * d_y high
+    (clipped to the image), until d_x and d_y both change by less than `rtol`, or until
     the next rectangle is one that was already used (a pixel-level cycle
     caused by noise; see docs/decisions.md). Both count as converged.
 
@@ -366,7 +374,7 @@ def measure_widths(
         raise ValueError(f"pixel_size_m must be > 0, got {pixel_size_m}")
     image = np.asarray(image, dtype=np.float64)
     ny, nx = image.shape
-    roi = Roi(0, nx, 0, ny)
+    roi = _start_area(image, pixel_size_m)
     seen: set[Roi] = set()
     previous: tuple[float, float] | None = None
     converged = False
@@ -444,6 +452,27 @@ def width_statistics(results: Sequence[WidthResult]) -> WidthStatistics:
         d_y_std_m=float(d_y.std(ddof=1)) if n > 1 else np.nan,
         n=n,
     )
+
+
+def _start_area(image: NDArray[np.float64], pixel_size_m: float) -> Roi:
+    """First integration area from the pixels above 1/e² of the peak.
+
+    Falls back to the whole image if the peak is not positive or the
+    thresholded moments are not positive (e.g. a single bright pixel).
+    """
+    ny, nx = image.shape
+    full = Roi(0, nx, 0, ny)
+    peak = image.max()
+    if not peak > 0:
+        return full
+    bright = np.where(image >= START_THRESHOLD * peak, image, 0.0)
+    moments = second_moments(bright, pixel_size_m, full)
+    if not (moments.var_x_m2 > 0 and moments.var_y_m2 > 0):
+        return full
+    d_x = 4.0 * np.sqrt(moments.var_x_m2)
+    d_y = 4.0 * np.sqrt(moments.var_y_m2)
+    roi, _ = _integration_area(moments, d_x, d_y, pixel_size_m, nx, ny)
+    return roi
 
 
 def _integration_area(

@@ -30,3 +30,14 @@ towards higher row indices). The simulator uses the same convention, so a beam
 rendered at (x0, y0) is measured at (x0, y0). Reason: the stage axis does not care
 where the beam sits on the sensor, and a centred origin makes off-centre and clipping
 checks symmetric.
+
+## 2026-10-27: Start the width iteration from a 1/e² estimate, not the full image
+
+The first integration area is the 3 · d rectangle around the centroid and 4σ widths
+of the pixels above 1/e² of the peak; the ISO iteration then runs unchanged from
+there. Reason: on a full 512 × 512 sensor, a residual offset of ~0.2 counts (the
+corner estimate's standard error is ~0.15 counts) weighted by r² outweighs the σ² of
+a 200 µm beam holding ~3·10⁶ counts, so the full-image first pass gave negative
+second moments on several near-waist frames. The thresholded pixels only choose
+the starting rectangle; they never enter the reported widths. Whether ISO/TR 11146-3
+prescribes a specific starting area: unverified.
