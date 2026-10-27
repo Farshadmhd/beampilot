@@ -528,6 +528,7 @@ def test_waist_outside_stage_range_is_reported() -> None:
         for key in ("m2", "d0_um", "z0_mm", "z_r_mm"):
             assert axis_result[key] is None, key
         assert "below the measured range" in axis_result["not_determined"]
+        assert axis_result["waist_side"] == "below"
         assert axis_result["theta_mrad"] > 0  # the far-field slope is measured
         assert axis_result["coverage"] is None
         assert not axis_result["m2_below_1"]

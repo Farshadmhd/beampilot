@@ -449,7 +449,8 @@ def evaluate(session: MeasurementSession, reason: str) -> dict[str, Any]:
         in mm, theta in mrad, M², each with std; coverage counts and text;
         waist in range; M² < 1 flag; d0, z0, zR and M² are None with a
         ``not_determined`` reason if the fit failed or its waist lies outside
-        the measured z range), ``iso_coverage_met``,
+        the measured z range, and ``waist_side`` then says whether it lies
+        below or above that range), ``iso_coverage_met``,
         ``general_astigmatism``, ``axes_not_aligned`` and ``table``; or
         ``status`` ``"not_enough_data"`` with a message and the table.
     """
@@ -573,6 +574,7 @@ def _axis_result(
     scenario = session.scenario
     z_lo, z_hi = float(z.min()), float(z.max())
     not_determined = None
+    side = None
     if not fit.success:
         not_determined = "caustic fit failed"
     elif not z_lo <= fit.z0_m <= z_hi:
@@ -605,6 +607,9 @@ def _axis_result(
     return {
         "fit_success": fit.success,
         "not_determined": not_determined,
+        # "below" / "above" the measured z range when the waist is
+        # extrapolated: where to measure next. None otherwise.
+        "waist_side": side,
         "d0_um": shown(fit.d0_m * 1e6, 2),
         "d0_std_um": shown(fit.d0_std_m * 1e6, 2),
         "z0_mm": shown(fit.z0_m * 1e3, 3),
