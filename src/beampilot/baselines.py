@@ -54,7 +54,8 @@ def suggest_verdict(evaluation: dict[str, Any]) -> str:
     """Verdict from an ``evaluate`` result by fixed rules.
 
     ``evaluate`` reports facts, not a verdict; both baselines use these rules:
-    not enough data -> measurement_failed; waist outside the stage on an axis
+    not enough data or a failed fit on an axis -> measurement_failed; waist
+    outside the stage on an axis
     -> waist_not_accessible; general astigmatism -> out of scope; ISO coverage
     met on both axes -> iso_compliant; otherwise estimate_not_compliant.
 
@@ -71,6 +72,8 @@ def suggest_verdict(evaluation: dict[str, Any]) -> str:
     if evaluation.get("status") != "ok":
         return "measurement_failed"
     axes = (evaluation["x"], evaluation["y"])
+    if not all(axis["fit_success"] for axis in axes):
+        return "measurement_failed"
     if not all(axis["waist_in_stage_range"] for axis in axes):
         return "waist_not_accessible"
     if evaluation["general_astigmatism"]:

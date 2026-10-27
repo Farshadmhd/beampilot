@@ -163,6 +163,7 @@
       "accepted_positions": 10,
       "x": {
         "fit_success": true,
+        "not_determined": null,
         "d0_um": 200.12,
         "d0_std_um": 0.39,
         "z0_mm": 119.969,
@@ -186,6 +187,7 @@
       },
       "y": {
         "fit_success": true,
+        "not_determined": null,
         "d0_um": 210.29,
         "d0_std_um": 0.4,
         "z0_mm": 119.967,
@@ -332,6 +334,7 @@
           "accepted_positions": 10,
           "x": {
             "fit_success": true,
+            "not_determined": null,
             "d0_um": 200.12,
             "d0_std_um": 0.39,
             "z0_mm": 119.969,
@@ -355,6 +358,7 @@
           },
           "y": {
             "fit_success": true,
+            "not_determined": null,
             "d0_um": 210.29,
             "d0_std_um": 0.4,
             "z0_mm": 119.967,

@@ -133,8 +133,18 @@ def test_naive_runs_to_finish(name: str) -> None:
         (
             {
                 "status": "ok",
-                "x": {"waist_in_stage_range": False},
-                "y": {"waist_in_stage_range": True},
+                "x": {"fit_success": False, "waist_in_stage_range": None},
+                "y": {"fit_success": True, "waist_in_stage_range": True},
+                "general_astigmatism": False,
+                "iso_coverage_met": False,
+            },
+            "measurement_failed",
+        ),
+        (
+            {
+                "status": "ok",
+                "x": {"fit_success": True, "waist_in_stage_range": False},
+                "y": {"fit_success": True, "waist_in_stage_range": True},
                 "general_astigmatism": True,
                 "iso_coverage_met": True,
             },
@@ -143,8 +153,8 @@ def test_naive_runs_to_finish(name: str) -> None:
         (
             {
                 "status": "ok",
-                "x": {"waist_in_stage_range": True},
-                "y": {"waist_in_stage_range": True},
+                "x": {"fit_success": True, "waist_in_stage_range": True},
+                "y": {"fit_success": True, "waist_in_stage_range": True},
                 "general_astigmatism": True,
                 "iso_coverage_met": True,
             },
@@ -153,8 +163,8 @@ def test_naive_runs_to_finish(name: str) -> None:
         (
             {
                 "status": "ok",
-                "x": {"waist_in_stage_range": True},
-                "y": {"waist_in_stage_range": True},
+                "x": {"fit_success": True, "waist_in_stage_range": True},
+                "y": {"fit_success": True, "waist_in_stage_range": True},
                 "general_astigmatism": False,
                 "iso_coverage_met": True,
             },
@@ -163,8 +173,8 @@ def test_naive_runs_to_finish(name: str) -> None:
         (
             {
                 "status": "ok",
-                "x": {"waist_in_stage_range": True},
-                "y": {"waist_in_stage_range": True},
+                "x": {"fit_success": True, "waist_in_stage_range": True},
+                "y": {"fit_success": True, "waist_in_stage_range": True},
                 "general_astigmatism": False,
                 "iso_coverage_met": False,
             },
