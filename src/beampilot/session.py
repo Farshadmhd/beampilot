@@ -178,6 +178,11 @@ class MeasurementSession:
         return self.scenario.camera
 
     @property
+    def wavelength_m(self) -> float:
+        """Laser wavelength in m: known to the experimenter, not hidden."""
+        return self.scenario.beam.wavelength_m
+
+    @property
     def positions_left(self) -> int:
         """Remaining ``measure_at`` budget."""
         return self.scenario.max_positions - len(self.measurements)
