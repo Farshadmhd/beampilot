@@ -97,6 +97,17 @@ def budget_text(state: RunState) -> str:
     )
 
 
+def fault_line(event: dict[str, Any]) -> str:
+    """Log line for a fault switch (from ``session.fault_events``)."""
+    faults = event["faults"]
+    source = "operator button" if event["source"] == "operator" else "scenario"
+    return (
+        f"💡 **Fault ({source})** from measurement {event['before_measurement']}: "
+        f"extra background {faults['extra_background_counts']:g} counts, "
+        f"laser power x{faults['power_factor']:g}"
+    )
+
+
 def log_text(state: RunState, last: int = 60) -> str:
     lines = state.log[-last:]
     return "\n\n".join(lines) if lines else "_No decisions yet._"
@@ -175,7 +186,7 @@ def build_app():
         with gr.Tab("Replay"):
             with gr.Row():
                 saved = gr.Dropdown(
-                    [str(p.relative_to(REPO_ROOT)) for p in demo_runs()],
+                    [p.relative_to(REPO_ROOT).as_posix() for p in demo_runs()],
                     label="Saved run",
                 )
                 upload = gr.File(label="...or load a run JSON", file_types=[".json"])
@@ -300,6 +311,7 @@ def live_run(scenario_name: str, seed: float, note: str, request: Any = None):
     threading.Thread(target=work, daemon=True).start()
     state = RunState()
     stage = (scenario.stage_min_m * 1e3, scenario.stage_max_m * 1e3)
+    faults_logged = 0
     while True:
         try:
             kind, payload = events.get(timeout=EVENT_POLL_S)
@@ -308,6 +320,10 @@ def live_run(scenario_name: str, seed: float, note: str, request: Any = None):
         if kind == "reply":
             state.apply_model_reply(payload)
         elif kind == "tool":
+            # Faults switched on before this measurement, logged in order.
+            for event in session.fault_events[faults_logged:]:
+                state.log.append(fault_line(event))
+            faults_logged = len(session.fault_events)
             state.apply_tool_call(payload)
         elif kind == "error":
             state.log.append(f"❌ {type(payload).__name__}: {payload}")
@@ -396,10 +412,17 @@ def replay(saved: str | None, upload: Any, seconds_per_step: float):
     note = run.data.get("operator_note")
     if note:
         title += f"\n\n**Operator note:** {note}"
+    fault_events = list(run.data.get("fault_events") or [])
+    measured = 0
     for kind, item in replay_events(run):
         if kind == "reply":
             state.apply_model_reply(item)
             continue
+        if item["name"] == "measure_at" and "measurement_id" in (item["result"] or {}):
+            measured += 1
+            for event in fault_events:
+                if event["before_measurement"] == measured:
+                    state.log.append(fault_line(event))
         state.apply_tool_call(item)
         yield (
             title,

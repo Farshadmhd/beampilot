@@ -94,6 +94,14 @@ def test_replay_generator_ends_with_the_report(saved_run) -> None:
     assert image is not None and image.shape[2] == 3  # re-simulated frame
 
 
+def test_replay_logs_fault_events() -> None:
+    path = demo_app.DEMO_RUNS_DIR / "clean_room_light_live.json"
+    if not path.exists():
+        pytest.skip("demo run not shipped")
+    *_, log, _report, _truth, _run = list(demo_app.replay(None, str(path), 0.0))[-1]
+    assert "💡 **Fault (operator button)** from measurement 6" in log
+
+
 def test_shipped_demo_runs_load() -> None:
     for path in demo_app.demo_runs():
         run = load_run(path)
