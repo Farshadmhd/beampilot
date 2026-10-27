@@ -12,13 +12,14 @@ and see only their JSON results, so the comparison with the agent is fair
 
 from __future__ import annotations
 
-from itertools import zip_longest
+from itertools import pairwise, zip_longest
 from typing import Any
 
 import numpy as np
 
 from beampilot.session import MeasurementSession
 from beampilot.tools import (
+    STAGE_END_FRACTION,
     evaluate,
     finish,
     get_setup,
@@ -37,7 +38,10 @@ MAX_EXPOSURE_STEP = 50.0  # largest exposure increase per retry
 MAX_TRIES = 3  # measurements per position
 # In zR. The first five are preferred; the rest are used only if some of those
 # fall off the stage (waist close to a stage end).
-NEAR_OFFSETS = (-0.8, -0.4, 0.0, 0.4, 0.8, -0.6, 0.6, -0.2, 0.2, -0.95, 0.95)
+NEAR_OFFSETS = (-0.8, -0.4, 0.0, 0.4, 0.8, -0.6, 0.6, -0.2, 0.2, -0.9, 0.9)
+# Existing points count as near only within NEAR_COUNT_ZR when planning, so a
+# refit (zR shifts by a few %) cannot push a counted point beyond 1 zR.
+NEAR_COUNT_ZR = 0.9
 # Far points start at 2.3 zR so a refit (zR shifts by a few %) keeps them
 # beyond 2 zR; existing points count as far from FAR_COUNT_ZR when planning.
 FAR_OFFSETS = (2.3, -2.3, 2.6, -2.6, 2.9, -2.9, 3.2, -3.2, 3.6, -3.6, 4.0, -4.0)
@@ -46,7 +50,7 @@ MIN_SPACING_ZR = 0.15  # skip planned positions closer than this to others
 # A planned position is skipped if the predicted d exceeds this fraction of the
 # smaller sensor side (0.5: sensor edges beyond +-4 sigma, clipping < 0.02 %).
 MAX_D_PER_SENSOR = 0.5
-PLACEMENT_ROUNDS = 2
+PLACEMENT_ROUNDS = 3
 EXTEND_ROUNDS = 3  # measurements towards a waist outside the measured span
 # Warning that makes the scripted operator reject a measurement anyway: beam
 # light in the corner patches biases the background offset.
@@ -58,9 +62,10 @@ def suggest_verdict(evaluation: dict[str, Any]) -> str:
 
     ``evaluate`` reports facts, not a verdict; both baselines use these rules:
     not enough data or a failed fit on an axis -> measurement_failed; waist
-    outside the stage on an axis
-    -> waist_not_accessible; general astigmatism -> out of scope; ISO coverage
-    met on both axes -> iso_compliant; otherwise estimate_not_compliant.
+    accessibility ``outside`` on an axis (z0 +- 2 sigma outside the stage;
+    ``uncertain`` does not count) -> waist_not_accessible; general
+    astigmatism -> out of scope; ISO coverage met on both axes and no M² < 1
+    flag -> iso_compliant; otherwise estimate_not_compliant.
 
     Parameters
     ----------
@@ -77,11 +82,11 @@ def suggest_verdict(evaluation: dict[str, Any]) -> str:
     axes = (evaluation["x"], evaluation["y"])
     if not all(axis["fit_success"] for axis in axes):
         return "measurement_failed"
-    if not all(axis["waist_in_stage_range"] for axis in axes):
+    if any(axis["waist_accessibility"] == "outside" for axis in axes):
         return "waist_not_accessible"
     if evaluation["general_astigmatism"]:
         return "general_astigmatism_out_of_scope"
-    if evaluation["iso_coverage_met"]:
+    if evaluation["iso_coverage_met"] and not evaluation.get("m2_below_1"):
         return "iso_compliant"
     return "estimate_not_compliant"
 
@@ -256,30 +261,62 @@ class _ScriptedOperator:
         return any((s < t <= z_mm) or (z_mm <= t < s) for t in too_large)
 
     def extend_towards_waist(self, evaluation: dict[str, Any]) -> bool:
-        """Measure halfway between the measured span and the stage end on the
-        side where the fit puts a waist that is inside the stage.
+        """Measure towards a waist that is not determined or not surely inside.
+
+        For ``waist_side`` below / above, or accessibility ``uncertain``,
+        bisect between the outermost good position and that stage end; for
+        ``within``, measure the middle of the gap. A waist reported
+        ``outside`` is approached the same way, because a far-field-only fit
+        can misplace it. Approaching stops once an accepted position lies
+        within ``STAGE_END_FRACTION`` of that stage end (as ``finish`` checks
+        for ``waist_not_accessible``).
 
         Returns True if a measurement was taken.
         """
         if evaluation.get("status") != "ok" or not self.good:
             return False
-        sides = [
-            evaluation[axis]["waist_side"]
-            for axis in ("x", "y")
-            if evaluation[axis].get("waist_side")
-            and evaluation[axis]["waist_in_stage_range"]
-        ]
-        if not sides or not self._has_budget(2):
+        if not self._has_budget(2):
             return False
         z_min, z_max = self.setup["stage_range_mm"]
         good_z = self._good_z()
-        if sides[0] == "below":
-            edge, end = min(good_z), z_min
-        else:
-            edge, end = max(good_z), z_max
-        # Bisect towards the stage end. Skip positions that already have a good
-        # measurement; a position that only failed (e.g. a saturated first
-        # scout) may be measured once more, now with a known exposure.
+        for axis in ("x", "y"):
+            result = evaluation[axis]
+            if not result["fit_success"]:
+                continue
+            side = result.get("waist_side")
+            if side == "within" and result["waist_gap_mm"]:
+                lower, upper = result["waist_gap_mm"]
+                target = round(0.5 * (lower + upper), 1)
+                if all(abs(target - z) >= 1.0 for z in self.measured_z):
+                    self.measure(
+                        target, "Scripted: the waist lies in a gap; measure there."
+                    )
+                    return True
+                continue
+            access = result["waist_accessibility"]
+            if side is None and access == "uncertain":
+                side = "below" if result["waist_near_stage_end"] == "start" else "above"
+            if side is None and access == "outside" and result["z0_mm"] is not None:
+                side = "below" if result["z0_mm"] < z_min else "above"
+            if side not in ("below", "above"):
+                continue
+            end = z_min if side == "below" else z_max
+            margin = STAGE_END_FRACTION * (z_max - z_min)
+            if any(abs(end - z) <= margin for z in good_z):
+                continue  # that stage end is reached (the margin finish checks)
+            edge = min(good_z) if side == "below" else max(good_z)
+            if self._measure_towards(edge, end, side):
+                return True
+        return False
+
+    def _measure_towards(self, edge: float, end: float, side: str) -> bool:
+        """Bisect from `edge` towards stage end `end`; True if measured.
+
+        Skips positions that already have a good measurement; a position that
+        only failed (e.g. a saturated first scout) may be measured once more,
+        now with a known exposure.
+        """
+        good_z = self._good_z()
         candidates = []
         point = edge
         for _ in range(3):
@@ -295,8 +332,7 @@ class _ScriptedOperator:
                     continue
                 self.remeasured.add(target)
             self.measure(
-                target,
-                f"Scripted: the fit puts the waist {sides[0]} the measured span.",
+                target, f"Scripted: the fit puts the waist {side} the measured span."
             )
             return True
         return False
@@ -314,7 +350,7 @@ class _ScriptedOperator:
                 continue
             z0, z_r = result["z0_mm"], result["z_r_mm"]
             for offsets, low, high, out in (
-                (NEAR_OFFSETS, 0.0, 1.0, near),
+                (NEAR_OFFSETS, 0.0, NEAR_COUNT_ZR, near),
                 (FAR_OFFSETS, FAR_COUNT_ZR, np.inf, far),
             ):
                 planned = taken + near + far
@@ -335,9 +371,42 @@ class _ScriptedOperator:
                         continue
                     out.append(z_mm)
                     have += 1
+            # The offset grid can miss free room in a one-sided near window
+            # (waist close to a stage end): fill the largest gaps instead.
+            planned = taken + near + far
+            have = sum(abs(z - z0) / z_r <= NEAR_COUNT_ZR for z in planned)
+            window = (
+                max(z_min, z0 - NEAR_COUNT_ZR * z_r),
+                min(z_max, z0 + NEAR_COUNT_ZR * z_r),
+            )
+            while have < 5:
+                z_mm = self._largest_gap_midpoint(window, self.measured_z + near + far)
+                if (
+                    z_mm is None
+                    or min(
+                        (abs(z_mm - z) for z in self.measured_z + near + far),
+                        default=np.inf,
+                    )
+                    < MIN_SPACING_ZR * z_r
+                ):
+                    break
+                near.append(z_mm)
+                have += 1
         # Alternate near and far so a short budget does not drop one kind.
         ordered = [z for pair in zip_longest(near, far) for z in pair if z is not None]
         return ordered[: max(self.positions_left, 0)]
+
+    @staticmethod
+    def _largest_gap_midpoint(
+        window: tuple[float, float], points: list[float]
+    ) -> float | None:
+        """Middle of the largest free interval of `window` between `points`."""
+        low, high = window
+        if high <= low:
+            return None
+        edges = sorted({low, high, *(p for p in points if low < p < high)})
+        width, start = max((b - a, a) for a, b in pairwise(edges))
+        return round(start + 0.5 * width, 1)
 
     def measure(self, z_mm: float, reason: str) -> dict[str, Any] | None:
         """Measure with exposure correction; accept or reject. None on error."""
@@ -497,7 +566,12 @@ def _beam_area(result: dict[str, Any]) -> float:
 
 def _finish(session: MeasurementSession, verdict: str, explanation: str) -> dict:
     result = finish(session, verdict, explanation)
-    if "error" in result and verdict == "iso_compliant":
-        # Should not happen (the rules use the same coverage), but never hang.
-        result = finish(session, "estimate_not_compliant", explanation)
+    if "error" in result:
+        # The rules mirror finish's guards, so this should not happen; if it
+        # does, say so instead of hiding it behind the original explanation.
+        result = finish(
+            session,
+            "estimate_not_compliant",
+            f"Scripted: finish refused {verdict} ({result['error']}).",
+        )
     return result

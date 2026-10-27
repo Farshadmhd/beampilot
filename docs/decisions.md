@@ -149,3 +149,73 @@ nulled until a position on its side is measured; the scripted baseline does that
 (10/10 seeds compliant for waists 10–30 mm and 235–245 mm from the stage start).
 The reviewer's alternative, null only when no accepted point lies within ~1–2 zR of
 the fitted waist, is left open for the maintainer.
+
+## 2026-10-27: Agent loop uses the stateless Responses API mode
+
+Verified in the Meta Model API docs: `instructions` is not kept across turns (resent
+every call), `max_output_tokens` caps reasoning plus visible output, tool results go
+back as `function_call_output` with the matching `call_id`, `parallel_tool_calls`
+defaults to true, `reasoning.effort` accepts minimal to xhigh (not "none"). Chaining
+turns with `previous_response_id` worked in a single run but failed in all six
+parallel runs with "400 referenced response not found or expired". The loop
+therefore uses the documented stateless mode: `store=false`,
+`include=["reasoning.encrypted_content"]`, and the full history (reasoning items,
+assistant messages, function calls and outputs) resent on every call. Prompt
+caching keeps this cheap (~90 % of input tokens cached in the real runs). Transient
+API errors (connection, timeout, rate limit, 5xx) are retried twice; any other
+error stops the run with a logged reason. Hard limits per run: 40 model calls,
+1.5 M tokens, $0.50. The first six real runs (seed 0, muse-spark-1.2, effort low)
+gave the expected verdict on every scenario with M² within 0.5 %; they used the
+prompt before the review fixes in this branch (number rule, background advice).
+
+## 2026-10-27: Waist numbers need a point within ±1 zR; accessibility from ±2σ
+
+Replaces the "waist inside the measured z range" test. d0, z0, zR and M² of an axis
+are null only if the fit failed or no accepted position lies within ±1 zR of the
+fitted waist. That still catches the collapse (far-field-only data: zR → 0 leaves no
+point within ±1 zR) but keeps sound fits whose waist lies just outside the measured
+span (e.g. waist 25 mm, nearest scout 31 mm). `waist_side` says below / above the
+measured positions or `within` a gap (`waist_gap_mm`).
+
+Waist accessibility is now one of three states from z0 ± 2σ(z0) against the stage:
+`inside`, `outside` or `uncertain` (`waist_near_stage_end` says which end). Only
+`outside` supports `waist_not_accessible`. A far-field-only fit can misplace the
+waist, so operators (scripted baseline, agent prompt) measure as close as possible
+to that stage end before concluding `outside`. Scripted sweep, seeds 0-9: waists 2 mm
+from either end are now iso_compliant 10/10 (before: 5/10 wrongly
+waist_not_accessible); waist_outside_range stays waist_not_accessible 10/10.
+
+## 2026-10-27: Stricter finish guard and a controller fallback report
+
+`finish` also refuses `iso_compliant` when general astigmatism or M² < 1 is flagged.
+When a hard limit or an API error stops the agent, the controller writes the report
+itself: `estimate_not_compliant` if M² is determined on both axes, otherwise
+`measurement_failed`, with `stopped_by_limit` set to the reason, so every run ends
+with a report built from session state.
+
+## 2026-10-27: Known limitation: extreme simple astigmatism
+
+The scripted baseline skips grid positions where the predicted beam (either axis) is
+wider than half the sensor (`MAX_D_PER_SENSOR = 0.5`), so for x and y waists far apart
+the near points of one axis can be blocked by the size of the other axis there,
+although such frames are often only `roi_clipped` and acceptable. Since the near-gap
+fill (which ignores that size check) was added, x 20 / y 230 mm is iso_compliant 10/10;
+but x 5 / y 245 mm still ends `estimate_not_compliant` with budget left (the gap fill
+is blocked by the minimum spacing). Conversely the gap fill could plan positions where
+the beam really overfills the sensor (not seen with the 2.8 mm sensor). A per-axis
+check against the clipping-loss estimate would fix both; left as is for now.
+
+## 2026-10-27: M² < 1 flag with a σ floor; waist_not_accessible needs the stage end
+
+The Jacobian σ(M²) misses systematic errors (one-sided data, the shared dark), so a
+true M² = 1.0 beam fitted 0.997 with a tiny σ was flagged as M² < 1 and `finish` then
+refused a correct `iso_compliant` (scripted, 1 of 10 seeds). The flag now uses
+σ floored at 1 % of M² (`M2_STD_FLOOR_REL`). This deviates from the plain
+"M² + 2σ < 1" rule asked for earlier; the maintainer should confirm.
+
+σ(z0) is just as optimistic: after far-field-only scouts a waist 2 mm inside the stage
+was reported `outside` at 10σ. So `finish` refuses `waist_not_accessible` unless an
+axis is `outside` and an accepted position lies within 5 % of the stage length
+(`STAGE_END_FRACTION`) from that stage end; the scripted operator approaches the end
+to that margin before concluding. waist_outside_range stays waist_not_accessible
+10/10 (8 positions).

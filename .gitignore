@@ -218,3 +218,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Agent run logs (pick runs for replay explicitly)
+runs/

@@ -40,6 +40,10 @@ MIN_PIXELS_ACROSS = 20  # ISO 11146-1: at least 20 px across the beam width
 BACKGROUND_SIGMA_LIMIT = 4.0
 ALIGNMENT_LIMIT_DEG = 10.0  # principal axes vs lab x/y
 MAX_CLIPPING_LOSS = 0.01  # ISO 11146-1: power outside the sensor below 1 %
+M2_STD_FLOOR_REL = 0.01  # smallest M² uncertainty used for the M² < 1 flag
+# waist_not_accessible needs an accepted position this close to the stage end
+# on the waist's side (fraction of the stage length).
+STAGE_END_FRACTION = 0.05
 # Modelled beam light in the corner patches, in offset standard errors, from
 # which the offset counts as beam light rather than background.
 CORNER_LIGHT_SIGMA = 1.0
@@ -447,10 +451,11 @@ def evaluate(session: MeasurementSession, reason: str) -> dict[str, Any]:
     dict
         ``status`` ``"ok"`` with ``x`` and ``y`` results (d0 in um, z0 and zR
         in mm, theta in mrad, M², each with std; coverage counts and text;
-        waist in range; M² < 1 flag; d0, z0, zR and M² are None with a
-        ``not_determined`` reason if the fit failed or its waist lies outside
-        the measured z range, and ``waist_side`` then says whether it lies
-        below or above that range), ``iso_coverage_met``,
+        waist accessibility inside / outside / uncertain from z0 +- 2 sigma;
+        M² < 1 flag; d0, z0, zR and M² are None with a ``not_determined``
+        reason if the fit failed or no accepted position lies within +-1 zR
+        of the fitted waist, and ``waist_side`` then says where it seems to
+        be), ``iso_coverage_met``,
         ``general_astigmatism``, ``axes_not_aligned`` and ``table``; or
         ``status`` ``"not_enough_data"`` with a message and the table.
     """
@@ -464,7 +469,10 @@ def finish(
     """End the run with a verdict; the report numbers come from session state.
 
     ``iso_compliant`` is refused if, on a fresh evaluation of the accepted
-    measurements, ISO coverage is not met on both axes.
+    measurements, ISO coverage is not met on both axes, general astigmatism
+    is flagged, or M² < 1 is flagged. ``waist_not_accessible`` is refused
+    unless an axis's waist is ``outside`` and an accepted position lies near
+    the stage end on that side.
 
     Parameters
     ----------
@@ -497,6 +505,100 @@ def finish(
             "cannot report iso_compliant: ISO coverage is not met on both axes "
             f"({detail}). Measure more positions or choose another verdict."
         )
+    if verdict == "iso_compliant" and evaluation.get("general_astigmatism"):
+        raise ToolInputError(
+            "cannot report iso_compliant: general astigmatism is flagged; use "
+            "general_astigmatism_out_of_scope"
+        )
+    if verdict == "iso_compliant" and evaluation.get("m2_below_1"):
+        raise ToolInputError(
+            "cannot report iso_compliant: M² < 1 is flagged, so the data are not "
+            "sound; check the measurements or choose another verdict"
+        )
+    if verdict == "waist_not_accessible":
+        problem = _waist_not_accessible_problem(session, evaluation)
+        if problem:
+            raise ToolInputError(f"cannot report waist_not_accessible: {problem}")
+    return {"report": _write_report(session, verdict, explanation, evaluation)}
+
+
+def _waist_not_accessible_problem(
+    session: MeasurementSession, evaluation: dict[str, Any]
+) -> str | None:
+    """Why waist_not_accessible is not supported yet, or None if it is.
+
+    Needs an axis with accessibility ``outside`` and an accepted position
+    within ``STAGE_END_FRACTION`` of the stage length from the stage end on
+    that waist's side: a far-field-only fit can misplace the waist, so the
+    end must have been approached first.
+    """
+    if evaluation.get("status") != "ok":
+        return "not enough data to locate the waist"
+    scenario = session.scenario
+    margin = STAGE_END_FRACTION * (scenario.stage_max_m - scenario.stage_min_m)
+    accepted = [m.z_m for m in session.measurements.values() if m.status == "accept"]
+    outside = []
+    for axis in ("x", "y"):
+        result = evaluation[axis]
+        if result["waist_accessibility"] != "outside":
+            continue
+        below = result["waist_side"] == "below" or (
+            result["waist_side"] is None
+            and (result["z0_mm"] or 0.0) * 1e-3 < scenario.stage_min_m
+        )
+        end = scenario.stage_min_m if below else scenario.stage_max_m
+        if any(abs(z - end) <= margin for z in accepted):
+            return None
+        outside.append(f"{axis} (stage {'start' if below else 'end'})")
+    if not outside:
+        return "no axis has waist_accessibility 'outside'"
+    return (
+        f"the waist of {', '.join(outside)} looks outside, but no accepted position "
+        f"lies within {margin * 1e3:.1f} mm of that stage end yet; measure closer "
+        "to it first"
+    )
+
+
+def fallback_report(session: MeasurementSession, reason: str) -> dict[str, Any]:
+    """Report written by the controller when a hard limit stops the agent.
+
+    Not an agent tool. The verdict comes from session state:
+    ``estimate_not_compliant`` if M² is determined on both axes, otherwise
+    ``measurement_failed``. ``stopped_by_limit`` holds the reason.
+
+    Parameters
+    ----------
+    session : MeasurementSession
+        The stopped run (not finished).
+    reason : str
+        Why the controller stopped the run, e.g. the limit that was hit.
+
+    Returns
+    -------
+    dict
+        The report, also stored as ``session.report``.
+    """
+    evaluation = _evaluation(session)
+    determined = evaluation.get("status") == "ok" and all(
+        evaluation[axis]["m2"] is not None for axis in ("x", "y")
+    )
+    verdict = "estimate_not_compliant" if determined else "measurement_failed"
+    explanation = (
+        f"Stopped by the controller before the agent finished: {reason}. "
+        "Verdict assigned from the measurements taken so far."
+    )
+    report = _write_report(session, verdict, explanation, evaluation)
+    report["stopped_by_limit"] = reason
+    return report
+
+
+def _write_report(
+    session: MeasurementSession,
+    verdict: str,
+    explanation: str,
+    evaluation: dict[str, Any],
+) -> dict[str, Any]:
+    """Report from session state; stored as ``session.report``."""
     statuses = [m.status for m in session.measurements.values()]
     report = {
         "verdict": verdict,
@@ -508,7 +610,7 @@ def finish(
         "positions_pending": statuses.count("pending"),
     }
     session.report = report
-    return {"report": report}
+    return report
 
 
 def _evaluation(session: MeasurementSession) -> dict[str, Any]:
@@ -565,26 +667,48 @@ def _axis_result(
 ) -> dict[str, Any]:
     """One axis of the evaluation in display units, with coverage.
 
-    d0, z0, zR and M² are reported only if the fit succeeded and its waist
-    lies inside the measured z range; otherwise they are None and
-    ``not_determined`` says why. A waist outside the measured range is an
-    extrapolation that can collapse (d0 -> 0, M² -> 0), so no number is
-    shown for it.
+    d0, z0, zR and M² are reported only if the fit succeeded and at least one
+    accepted position lies within +-1 zR of the fitted waist; otherwise they
+    are None and ``not_determined`` says why. Without a point near the waist
+    the fit extrapolates and can collapse (d0 -> 0, zR -> 0, M² -> 0), so no
+    number is shown. ``waist_side`` then says where the waist seems to be:
+    ``below`` / ``above`` the measured positions, or ``within`` a gap between
+    them (``waist_gap_mm``).
+
+    ``waist_accessibility`` uses z0 +- 2 sigma(z0) against the stage range:
+    ``inside``, ``outside`` (the waist cannot be reached) or ``uncertain``
+    (measure closer to ``waist_near_stage_end``). None if the fit failed.
     """
-    scenario = session.scenario
-    z_lo, z_hi = float(z.min()), float(z.max())
+    z0, z_r = fit.z0_m, fit.z_r_m
     not_determined = None
     side = None
+    gap_mm = None
     if not fit.success:
         not_determined = "caustic fit failed"
-    elif not z_lo <= fit.z0_m <= z_hi:
-        side = "below" if fit.z0_m < z_lo else "above"
-        limit = z_lo if fit.z0_m < z_lo else z_hi
+    elif not (np.isfinite(z_r) and z_r > 0 and np.any(np.abs(z - z0) <= z_r)):
+        z_lo, z_hi = float(z.min()), float(z.max())
+        if z0 < z_lo:
+            side, where = (
+                "below",
+                f"below the measured positions (< {z_lo * 1e3:.1f} mm)",
+            )
+        elif z0 > z_hi:
+            side, where = (
+                "above",
+                f"above the measured positions (> {z_hi * 1e3:.1f} mm)",
+            )
+        else:
+            side = "within"
+            lower = float(z[z <= z0].max())
+            upper = float(z[z >= z0].min())
+            gap_mm = [_num(lower * 1e3, 1), _num(upper * 1e3, 1)]
+            where = f"in the gap between {lower * 1e3:.1f} and {upper * 1e3:.1f} mm"
         not_determined = (
-            f"the fit puts the waist {side} the measured range (beyond "
-            f"{limit * 1e3:.1f} mm): d0, z0, zR and M² would be extrapolated"
+            f"no accepted position within ±1 zR of the fitted waist, which lies "
+            f"{where}: d0, z0, zR and M² would be extrapolated"
         )
     determined = not_determined is None
+    accessibility, near_end = _waist_accessibility(session, fit)
 
     def shown(value: float, digits: int) -> float | None:
         return _num(value, digits) if determined else None
@@ -607,9 +731,10 @@ def _axis_result(
     return {
         "fit_success": fit.success,
         "not_determined": not_determined,
-        # "below" / "above" the measured z range when the waist is
-        # extrapolated: where to measure next. None otherwise.
+        # Where to measure next when the waist is not determined:
+        # "below" / "above" the measured positions or "within" a gap.
         "waist_side": side,
+        "waist_gap_mm": gap_mm,
         "d0_um": shown(fit.d0_m * 1e6, 2),
         "d0_std_um": shown(fit.d0_std_m * 1e6, 2),
         "z0_mm": shown(fit.z0_m * 1e3, 3),
@@ -622,16 +747,37 @@ def _axis_result(
         "m2_std": shown(fit.m2_std, 4),
         "residual_rms_percent": _num(fit.residual_rms * 100, 3),
         "coverage": coverage_result,
-        # From the fitted waist position even when it is extrapolated: that
-        # is exactly how a waist outside the stage shows up. None if no fit.
-        "waist_in_stage_range": (
-            bool(scenario.stage_min_m <= fit.z0_m <= scenario.stage_max_m)
-            if fit.success
-            else None
+        # From the fitted waist +- 2 sigma, even when extrapolated: that is how
+        # a waist outside the stage shows up. None if the fit failed.
+        "waist_accessibility": accessibility,
+        "waist_near_stage_end": near_end,
+        # M² < 1 is unphysical; flag it only if it holds beyond 2 sigma. The
+        # Jacobian sigma misses systematic errors (one-sided data, shared dark),
+        # so it is floored at M2_STD_FLOOR_REL of M².
+        "m2_below_1": bool(
+            determined
+            and fit.m2 + 2.0 * max(fit.m2_std, M2_STD_FLOOR_REL * fit.m2) < 1.0
         ),
-        # M² < 1 is unphysical; flag it only if it holds beyond 2 sigma.
-        "m2_below_1": bool(determined and fit.m2 + 2.0 * fit.m2_std < 1.0),
     }
+
+
+def _waist_accessibility(
+    session: MeasurementSession, fit: CausticFit
+) -> tuple[str | None, str | None]:
+    """``inside`` / ``outside`` / ``uncertain`` from z0 +- 2 sigma, and for
+    ``uncertain`` the stage end (``start`` / ``end``) to measure closer to.
+    """
+    if not fit.success:
+        return None, None
+    scenario = session.scenario
+    sigma = fit.z0_std_m if np.isfinite(fit.z0_std_m) else np.inf
+    low, high = fit.z0_m - 2.0 * sigma, fit.z0_m + 2.0 * sigma
+    if low >= scenario.stage_min_m and high <= scenario.stage_max_m:
+        return "inside", None
+    if high < scenario.stage_min_m or low > scenario.stage_max_m:
+        return "outside", None
+    centre = 0.5 * (scenario.stage_min_m + scenario.stage_max_m)
+    return "uncertain", "start" if fit.z0_m < centre else "end"
 
 
 def _table_row(m: Measurement) -> dict[str, Any]:
