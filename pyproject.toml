@@ -23,6 +23,10 @@ dev = [
     "pytest",
     "ruff",
 ]
+# Demo UI only (python -m beampilot.app); not needed for the core package.
+demo = [
+    "gradio==6.30.0",
+]
 
 [project.urls]
 Repository = "https://github.com/Farshadmhd/beampilot"
