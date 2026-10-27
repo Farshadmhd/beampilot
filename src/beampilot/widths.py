@@ -1,0 +1,503 @@
+"""ISO 11146 second-moment beam widths from camera frames.
+
+Background handling follows ISO/TR 11146-3: subtract a mean dark frame, then
+a fine offset estimated from the image corners, and keep negative pixel values.
+Image coordinates: x along columns, y along rows, in metres relative to the
+image centre (the same convention as :mod:`beampilot.simulator`).
+"""
+
+from __future__ import annotations
+
+from collections.abc import Sequence
+from dataclasses import dataclass
+
+import numpy as np
+from numpy.typing import ArrayLike, NDArray
+
+MIN_DARK_FRAMES = 10
+
+
+@dataclass(frozen=True)
+class BackgroundInfo:
+    """Residual background found by the fine offset correction.
+
+    Parameters
+    ----------
+    offset_counts : float
+        Mean of the four corner patches after dark subtraction, in counts.
+        This value was subtracted from the whole image.
+    std_counts : float
+        Standard deviation of the corner pixels after dark subtraction, in
+        counts. This is the noise of a single pixel, not the uncertainty of
+        `offset_counts`.
+    offset_std_err_counts : float
+        Standard error of `offset_counts` in counts, ``std_counts / sqrt(N)``
+        for N corner pixels (assumes independent pixel noise). Because the
+        offset is subtracted from every pixel, this error enters the second
+        moments as a residual background.
+    corner_means_counts : tuple of float
+        Mean of each corner patch in counts, ordered top-left, top-right,
+        bottom-left, bottom-right. A spread between them indicates a
+        background gradient.
+    """
+
+    offset_counts: float
+    std_counts: float
+    offset_std_err_counts: float
+    corner_means_counts: tuple[float, float, float, float]
+
+
+def mean_dark(dark_frames: Sequence[ArrayLike] | NDArray) -> NDArray[np.float64]:
+    """Average dark frames pixel by pixel.
+
+    Parameters
+    ----------
+    dark_frames : sequence of 2D arrays, or 3D array of shape (n, ny, nx)
+        Dark frames in counts, all with the same shape.
+
+    Returns
+    -------
+    ndarray of float64, shape (ny, nx)
+        Mean dark frame in counts.
+
+    Raises
+    ------
+    ValueError
+        If fewer than ``MIN_DARK_FRAMES`` (10) frames are given, or the
+        frames are not 2D.
+    """
+    stack = np.asarray(dark_frames, dtype=np.float64)
+    if stack.ndim != 3:
+        raise ValueError(f"expected a stack of 2D frames, got shape {stack.shape}")
+    if stack.shape[0] < MIN_DARK_FRAMES:
+        raise ValueError(
+            f"need at least {MIN_DARK_FRAMES} dark frames, got {stack.shape[0]}"
+        )
+    return stack.mean(axis=0)
+
+
+def subtract_background(
+    frame: ArrayLike,
+    dark_mean: ArrayLike,
+    corner_fraction: float = 0.035,
+) -> tuple[NDArray[np.float64], BackgroundInfo]:
+    """Subtract the mean dark frame and the residual corner offset.
+
+    Each corner patch is ``corner_fraction`` of the image width by
+    ``corner_fraction`` of the image height (at least 1 pixel). The corners
+    must be free of beam light. Negative pixel values are kept (ISO/TR 11146-3);
+    clipping them at zero would bias the second moments.
+
+    Parameters
+    ----------
+    frame : 2D array
+        Raw frame in counts.
+    dark_mean : 2D array
+        Mean dark frame in counts, same shape as `frame` (see :func:`mean_dark`).
+    corner_fraction : float, optional
+        Corner patch size as a fraction of the image size, in (0, 0.5).
+        Default 0.035 (the design allows 2-5 %).
+
+    Returns
+    -------
+    image : ndarray of float64
+        Background-corrected image in counts; may contain negative values.
+    info : BackgroundInfo
+        Residual offset that was removed and its pixel noise.
+
+    Raises
+    ------
+    ValueError
+        If the shapes differ or `corner_fraction` is outside (0, 0.5).
+    """
+    frame = np.asarray(frame, dtype=np.float64)
+    dark_mean = np.asarray(dark_mean, dtype=np.float64)
+    if frame.shape != dark_mean.shape or frame.ndim != 2:
+        raise ValueError(
+            f"frame {frame.shape} and dark_mean {dark_mean.shape} must be equal 2D"
+        )
+    if not 0 < corner_fraction < 0.5:
+        raise ValueError(f"corner_fraction must be in (0, 0.5), got {corner_fraction}")
+
+    image = frame - dark_mean
+    ny, nx = image.shape
+    cy = max(1, round(corner_fraction * ny))
+    cx = max(1, round(corner_fraction * nx))
+    corners = (
+        image[:cy, :cx],
+        image[:cy, -cx:],
+        image[-cy:, :cx],
+        image[-cy:, -cx:],
+    )
+    corner_pixels = np.concatenate([c.ravel() for c in corners])
+    offset = float(corner_pixels.mean())
+    std = float(corner_pixels.std())
+    info = BackgroundInfo(
+        offset_counts=offset,
+        std_counts=std,
+        offset_std_err_counts=std / np.sqrt(corner_pixels.size),
+        corner_means_counts=tuple(float(c.mean()) for c in corners),
+    )
+    return image - offset, info
+
+
+@dataclass(frozen=True)
+class Roi:
+    """Rectangular region of interest in pixel indices (half-open, like slices).
+
+    Parameters
+    ----------
+    x_start, x_stop : int
+        Column range ``[x_start, x_stop)``.
+    y_start, y_stop : int
+        Row range ``[y_start, y_stop)``.
+    """
+
+    x_start: int
+    x_stop: int
+    y_start: int
+    y_stop: int
+
+
+@dataclass(frozen=True)
+class Moments:
+    """First and second moments of an intensity distribution.
+
+    Parameters
+    ----------
+    x_c_m, y_c_m : float
+        Centroid in m, relative to the image centre.
+    var_x_m2, var_y_m2 : float
+        Second moments sigma_x² and sigma_y² about the centroid, in m².
+    cov_xy_m2 : float
+        Mixed second moment sigma_xy about the centroid, in m².
+    total_counts : float
+        Sum of the pixel values inside the ROI, in counts.
+    """
+
+    x_c_m: float
+    y_c_m: float
+    var_x_m2: float
+    var_y_m2: float
+    cov_xy_m2: float
+    total_counts: float
+
+
+@dataclass(frozen=True)
+class WidthResult:
+    """ISO 11146 beam widths of one frame.
+
+    Parameters
+    ----------
+    d_x_m, d_y_m : float
+        Second-moment (4 sigma) beam widths along the lab x and y axes, in m.
+        NaN if the measurement failed.
+    x_c_m, y_c_m : float
+        Centroid in m, relative to the image centre.
+    azimuth_rad : float
+        Angle between the x axis and the major principal axis, in rad, in
+        (-pi/2, pi/2]. Meaningless when the profile is nearly circular.
+    ellipticity : float
+        Ratio of the minor to the major principal-axis width (0 to 1).
+    iterations : int
+        Number of moment calculations used.
+    converged : bool
+        True if d_x and d_y changed by less than `rtol` between the last two
+        integration areas, or if the next integration area would repeat one
+        already used.
+    roi : Roi
+        Integration area of the last moment calculation, in pixel indices.
+    roi_sum_counts : float
+        Sum of the background-corrected pixel values inside `roi`, in counts.
+    roi_clipped : bool
+        True if the 3 * d_x by 3 * d_y rectangle around the final centroid
+        reaches past the image edge and had to be cut. The beam is then
+        truncated and the widths are biased low; the result must not be
+        trusted even when ``converged`` is True.
+    """
+
+    d_x_m: float
+    d_y_m: float
+    x_c_m: float
+    y_c_m: float
+    azimuth_rad: float
+    ellipticity: float
+    iterations: int
+    converged: bool
+    roi: Roi
+    roi_sum_counts: float
+    roi_clipped: bool
+
+
+@dataclass(frozen=True)
+class WidthStatistics:
+    """Mean and spread of beam widths over repeated frames at one position.
+
+    Parameters
+    ----------
+    d_x_mean_m, d_y_mean_m : float
+        Mean of d_x and d_y in m.
+    d_x_std_m, d_y_std_m : float
+        Sample standard deviation (ddof=1) of d_x and d_y in m; NaN for a
+        single frame.
+    n : int
+        Number of frames.
+    """
+
+    d_x_mean_m: float
+    d_x_std_m: float
+    d_y_mean_m: float
+    d_y_std_m: float
+    n: int
+
+
+def second_moments(image: ArrayLike, pixel_size_m: float, roi: Roi) -> Moments:
+    """Centroid and second moments of the image inside a rectangular ROI.
+
+    Pixels are treated as point samples at their centres. Negative pixel
+    values are used as they are.
+
+    Parameters
+    ----------
+    image : 2D array
+        Background-corrected image in counts.
+    pixel_size_m : float
+        Pixel pitch in m.
+    roi : Roi
+        Integration area in pixel indices.
+
+    Returns
+    -------
+    Moments
+        Centroid in m and second moments in m². All NaN if the summed
+        intensity inside the ROI is not positive.
+
+    Raises
+    ------
+    ValueError
+        If `pixel_size_m` is not positive, or the ROI is empty, has negative
+        indices or reaches outside the image.
+    """
+    # Written as "not x > 0" so that NaN is rejected too.
+    if not pixel_size_m > 0:
+        raise ValueError(f"pixel_size_m must be > 0, got {pixel_size_m}")
+    image = np.asarray(image, dtype=np.float64)
+    ny, nx = image.shape
+    if not (
+        0 <= roi.x_start < roi.x_stop <= nx and 0 <= roi.y_start < roi.y_stop <= ny
+    ):
+        raise ValueError(f"roi {roi} is empty or outside the image ({ny}, {nx})")
+    sub = image[roi.y_start : roi.y_stop, roi.x_start : roi.x_stop]
+    x_m = (np.arange(roi.x_start, roi.x_stop) - (nx - 1) / 2.0) * pixel_size_m
+    y_m = (np.arange(roi.y_start, roi.y_stop) - (ny - 1) / 2.0) * pixel_size_m
+
+    total = float(sub.sum())
+    if not total > 0:
+        return Moments(np.nan, np.nan, np.nan, np.nan, np.nan, total)
+    profile_x = sub.sum(axis=0)
+    profile_y = sub.sum(axis=1)
+    x_c = float(profile_x @ x_m / total)
+    y_c = float(profile_y @ y_m / total)
+    dx = x_m - x_c
+    dy = y_m - y_c
+    return Moments(
+        x_c_m=x_c,
+        y_c_m=y_c,
+        var_x_m2=float(profile_x @ dx**2 / total),
+        var_y_m2=float(profile_y @ dy**2 / total),
+        cov_xy_m2=float(dy @ sub @ dx / total),
+        total_counts=total,
+    )
+
+
+def measure_widths(
+    image: ArrayLike,
+    pixel_size_m: float,
+    max_iter: int = 25,
+    rtol: float = 1e-4,
+) -> WidthResult:
+    """ISO 11146-1 second-moment beam widths with an iterated integration area.
+
+    The first pass uses the whole image. Each further pass uses a rectangle
+    centred on the last centroid, 3 * d_x wide and 3 * d_y high (clipped to
+    the image), until d_x and d_y both change by less than `rtol`, or until
+    the next rectangle is one that was already used (a pixel-level cycle
+    caused by noise; see docs/decisions.md). Both count as converged.
+
+    Widths are measured along the lab x and y axes, not along the principal
+    axes. The design assumes beams aligned to x/y; for a rotated beam use
+    `azimuth_rad` and `ellipticity` to detect it.
+
+    Widths become unreliable at low peak signal (low SNR): background noise
+    and the residual offset inside the 3 * d rectangle are weighted by the
+    squared distance from the centroid. For example, at a peak of ~430 counts
+    with 5 counts read noise, single-frame widths scatter by ~5 % (1 sigma).
+    This function does not check the signal level; a quality flag (peak /
+    full scale) in the measurement tool will. ``converged`` only says the
+    iteration settled, not that the widths are accurate.
+
+    Parameters
+    ----------
+    image : 2D array
+        Background-corrected image in counts (negative values allowed).
+    pixel_size_m : float
+        Pixel pitch in m.
+    max_iter : int, optional
+        Maximum number of moment calculations. Default 25.
+    rtol : float, optional
+        Relative change of d_x and d_y below which the iteration stops.
+        Default 1e-4.
+
+    Returns
+    -------
+    WidthResult
+        Widths in m, centroid in m, azimuth in rad. If a second moment comes
+        out <= 0 (e.g. no beam, or a badly corrected background), widths are
+        NaN and ``converged`` is False.
+
+    Raises
+    ------
+    ValueError
+        If `max_iter` is below 1 or `pixel_size_m` is not positive.
+    """
+    if max_iter < 1:
+        raise ValueError(f"max_iter must be >= 1, got {max_iter}")
+    if not pixel_size_m > 0:
+        raise ValueError(f"pixel_size_m must be > 0, got {pixel_size_m}")
+    image = np.asarray(image, dtype=np.float64)
+    ny, nx = image.shape
+    roi = Roi(0, nx, 0, ny)
+    seen: set[Roi] = set()
+    previous: tuple[float, float] | None = None
+    converged = False
+
+    for iteration in range(1, max_iter + 1):
+        moments = second_moments(image, pixel_size_m, roi)
+        # Written as "not x > 0" so that NaN moments also fail here.
+        if not (moments.var_x_m2 > 0 and moments.var_y_m2 > 0):
+            return _failed_result(moments, iteration, roi)
+        d_x = 4.0 * np.sqrt(moments.var_x_m2)
+        d_y = 4.0 * np.sqrt(moments.var_y_m2)
+        if previous is not None and (
+            abs(d_x - previous[0]) <= rtol * previous[0]
+            and abs(d_y - previous[1]) <= rtol * previous[1]
+        ):
+            converged = True
+            break
+        previous = (d_x, d_y)
+        seen.add(roi)
+        next_roi, _ = _integration_area(moments, d_x, d_y, pixel_size_m, nx, ny)
+        # With noise the rectangle can flip by one pixel each pass; once it
+        # repeats, further passes only cycle through the same areas.
+        if next_roi in seen:
+            converged = True
+            break
+        roi = next_roi
+
+    _, roi_clipped = _integration_area(moments, d_x, d_y, pixel_size_m, nx, ny)
+    azimuth, ellipticity = _azimuth_and_ellipticity(moments)
+    return WidthResult(
+        d_x_m=float(d_x),
+        d_y_m=float(d_y),
+        x_c_m=moments.x_c_m,
+        y_c_m=moments.y_c_m,
+        azimuth_rad=azimuth,
+        ellipticity=ellipticity,
+        iterations=iteration,
+        converged=converged,
+        roi=roi,
+        roi_sum_counts=moments.total_counts,
+        roi_clipped=roi_clipped,
+    )
+
+
+def width_statistics(results: Sequence[WidthResult]) -> WidthStatistics:
+    """Mean and sample standard deviation of d_x and d_y over repeats.
+
+    A failed frame (NaN width) makes the corresponding mean and std NaN, so a
+    bad repeat cannot go unnoticed.
+
+    Parameters
+    ----------
+    results : sequence of WidthResult
+        Width results of repeated frames at one stage position.
+
+    Returns
+    -------
+    WidthStatistics
+        Means and standard deviations in m.
+
+    Raises
+    ------
+    ValueError
+        If `results` is empty.
+    """
+    if len(results) == 0:
+        raise ValueError("need at least one width result")
+    d_x = np.array([r.d_x_m for r in results])
+    d_y = np.array([r.d_y_m for r in results])
+    n = len(results)
+    return WidthStatistics(
+        d_x_mean_m=float(d_x.mean()),
+        d_x_std_m=float(d_x.std(ddof=1)) if n > 1 else np.nan,
+        d_y_mean_m=float(d_y.mean()),
+        d_y_std_m=float(d_y.std(ddof=1)) if n > 1 else np.nan,
+        n=n,
+    )
+
+
+def _integration_area(
+    moments: Moments, d_x: float, d_y: float, pixel_size_m: float, nx: int, ny: int
+) -> tuple[Roi, bool]:
+    """Rectangle of 3 * d_x by 3 * d_y centred on the centroid, clipped.
+
+    Also returns True if the rectangle had to be cut at the image edge.
+    """
+    x_c_px = moments.x_c_m / pixel_size_m + (nx - 1) / 2.0
+    y_c_px = moments.y_c_m / pixel_size_m + (ny - 1) / 2.0
+    half_x_px = 1.5 * d_x / pixel_size_m
+    half_y_px = 1.5 * d_y / pixel_size_m
+    # Include every pixel whose centre lies inside the rectangle.
+    x_start = int(np.ceil(x_c_px - half_x_px))
+    x_stop = int(np.floor(x_c_px + half_x_px)) + 1
+    y_start = int(np.ceil(y_c_px - half_y_px))
+    y_stop = int(np.floor(y_c_px + half_y_px)) + 1
+    clipped = x_start < 0 or y_start < 0 or x_stop > nx or y_stop > ny
+    roi = Roi(
+        x_start=max(0, x_start),
+        x_stop=min(nx, x_stop),
+        y_start=max(0, y_start),
+        y_stop=min(ny, y_stop),
+    )
+    return roi, clipped
+
+
+def _azimuth_and_ellipticity(moments: Moments) -> tuple[float, float]:
+    """Major-axis azimuth in rad and minor/major principal width ratio."""
+    var_x, var_y, cov = moments.var_x_m2, moments.var_y_m2, moments.cov_xy_m2
+    azimuth = 0.5 * np.arctan2(2.0 * cov, var_x - var_y)
+    mean = 0.5 * (var_x + var_y)
+    half_diff = np.hypot(0.5 * (var_x - var_y), cov)
+    var_major, var_minor = mean + half_diff, mean - half_diff
+    ellipticity = np.sqrt(var_minor / var_major) if var_minor > 0 else np.nan
+    return float(azimuth), float(ellipticity)
+
+
+def _failed_result(moments: Moments, iterations: int, roi: Roi) -> WidthResult:
+    """Result for a frame whose second moments are not positive.
+
+    ``roi_clipped`` is False because no 3 * d rectangle could be formed.
+    """
+    return WidthResult(
+        d_x_m=np.nan,
+        d_y_m=np.nan,
+        x_c_m=moments.x_c_m,
+        y_c_m=moments.y_c_m,
+        azimuth_rad=np.nan,
+        ellipticity=np.nan,
+        iterations=iterations,
+        converged=False,
+        roi=roi,
+        roi_sum_counts=moments.total_counts,
+        roi_clipped=False,
+    )
