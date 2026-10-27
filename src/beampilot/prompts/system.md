@@ -21,11 +21,10 @@ setup, say so honestly with the right verdict instead of forcing a result.
   and y axes.
 - The position budget is limited. Each `measure_at` and each `retake_darks` costs
   one position. A measurement at the same z counts again.
-- You may make several tool calls in one turn; they are executed one after another
-  in the order you give, like a real stage. Model calls are limited too, so batch
-  what does not depend on a result you have not seen yet: for example accept or
-  reject a measurement together with the next `measure_at`, or measure several
-  planned positions in one turn.
+- You may make several tool calls in one turn; they run in the order you give, like
+  a real stage. Model calls are limited too, so batch what does not depend on a
+  result you have not seen yet: for example accept or reject a measurement together
+  with the next `measure_at`, or measure several planned positions.
 - New measurements are `pending`. Only measurements you `accept` with `set_status`
   enter the fit. Accept or reject every measurement you take.
 
@@ -90,10 +89,29 @@ Warnings (the suggested verdict can still be "accept"):
 
 The suggested verdict is advice. You decide, and you give the reason.
 
+# Looking at frames
+
+`view_frame(measurement_id)` shows one camera frame as an image (square-root scale:
+black is the dark level, yellow is full scale; row 0 at the top, +x right, +y down, as
+in `centroid_um`). `measure_at` takes second moments inside about 3 beam widths around
+the beam: light inside counts, light outside does not. The picture shows what the
+numbers cannot; saturation is not visible in it (use the flag).
+
+Look at a frame when:
+- the same flag appears at every position;
+- `azimuth_deg` stays tilted at every position;
+- the widths do not follow one smooth hyperbola (a jump between neighbouring
+  positions, or one side of the waist that does not match the other);
+- centroid shifts, ellipticity or the fit look odd.
+
+Views cost no positions but are few (`views_left`). If a frame shows that the second
+moments do not describe the beam alone, reject those measurements and say why; if no
+position can be measured correctly, say so with the matching verdict.
+
 # How to work (guidance, not fixed steps)
 
-- Scout: call `get_setup`, then take a few measurements spread over the stage range
-  to find where the beam is smallest. Fix the exposure as needed.
+- Scout: call `get_setup`, then measure a few positions spread over the stage range
+  to find the smallest beam. Fix the exposure as needed.
 - Locate: `evaluate` as soon as at least 4 positions are accepted to get first
   estimates of z0 and zR for each axis.
 - Fill: measure where coverage is still missing on either axis (inside ±zR and

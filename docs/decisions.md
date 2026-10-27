@@ -219,3 +219,46 @@ axis is `outside` and an accepted position lies within 5 % of the stage length
 (`STAGE_END_FRACTION`) from that stage end; the scripted operator approaches the end
 to that margin before concluding. waist_outside_range stays waist_not_accessible
 10/10 (8 positions).
+
+## 2026-10-27: view_frame, the 7th tool, and the ghost reflection
+
+Smoke test (`scripts/smoke_test_image.py`, muse-spark-1.2): a simulated frame as a
+PNG data URL was described correctly both in a user message and inside a
+`function_call_output` (content parts `input_text` + `input_image`): two spots,
+positions and relative brightness right. The docs disagree on images outside user
+messages; the test shows they reach the model, so `view_frame` returns its image in
+the tool output. The image is a 512 × 512 PNG on a square-root brightness scale (faint
+structure next to a bright peak stays visible), handed to the agent loop by
+`image_id` and never written to logs or run files. Views have their own budget
+(4 per run) and cost no positions, so looking is cheap but not free.
+
+The simulator's optional `Ghost` adds a second Gaussian spot (relative power, offset,
+size factor, optional z window, offset changing linearly with z). Known answer: for
+equal widths the mixture's second moment is σ² + w₁w₂Δ² and the centroid moves by
+w₂Δ; the test checks this to 0.1-0.2 % (integer rounding of faint tails). The prompt
+describes `view_frame` generically ("when numbers look odd or flags are ambiguous")
+and does not name ghosts, because ghosts are a held-out fault in evaluation group C.
+
+## 2026-10-27: general look-triggers, image history, view_frame ablation
+
+In `ghost_everywhere` the agent never called `view_frame`: it read the constant
+`axes_not_aligned` flag as a beam property and reported a confident but wrong
+`estimate_not_compliant`. The prompt now names **general** triggers for looking at a
+frame: the same flag at every position, an azimuth that stays tilted, widths that do
+not follow one smooth hyperbola, odd centroid shifts or fit. It still names no fault
+type. Because this change was made after seeing a ghost run, evaluation case C1
+(a ghost everywhere) is reported as "seen" (evaluation plan, deviation 1).
+
+Only the 2 most recent `view_frame` images stay in the resent history
+(`KEEP_IMAGES`); older ones are replaced by a short text stub. Without this, every
+image (about 300-400 kB as a data URL) was resent on every later call of the
+stateless loop.
+
+`AgentConfig(view_frame=False)` removes the tool, the "Looking at frames" prompt
+section and the view budget, for the group C ablation. A `view_frame` call is then an
+unknown tool.
+
+The simulator gained an `Aperture` (iris over a z range, profile truncated,
+diffraction ignored; known answer: truncated-Gaussian second moment
+σ² = (w²/4)(1 − A e^−A / (1 − e^−A)), A = 2a²/w²), `HotPixels` (extra counts in
+light frames only) and a pointing drift per measurement, for evaluation group C.

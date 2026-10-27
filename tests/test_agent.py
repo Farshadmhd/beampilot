@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from beampilot.agent import (
+    IMAGE_STUB,
     NUDGE,
     TOOL_DEFINITIONS,
     AgentConfig,
@@ -409,6 +410,27 @@ def test_should_stop_cancels_before_the_next_model_call() -> None:
     assert run.report["stopped_by_limit"] == "cancelled by the controller"
 
 
+def test_view_frame_image_reaches_the_model_but_not_the_log() -> None:
+    client = FakeClient(
+        [
+            _response(_call("measure_at", z_mm=120.0, exposure_ms=1.5)),
+            _response(_call("view_frame", measurement_id="m1")),
+            _response(_call("finish", verdict="measurement_failed", explanation="x")),
+        ]
+    )
+    session = _session()
+    run = run_agent(session, client)
+    output = _outputs(client.requests[2])[-1]["output"]
+    assert isinstance(output, list)
+    text, image = output
+    assert json.loads(text["text"])["image_id"] == "view1-m1"
+    assert image["type"] == "input_image"
+    assert image["image_url"].startswith("data:image/png;base64,")
+    assert session.images == {}  # handed over once, not kept
+    logged = json.dumps(run.to_dict()) + json.dumps(session.log)
+    assert "base64" not in logged
+
+
 def test_requests_never_contain_the_hidden_truth() -> None:
     client = FakeClient(
         [
@@ -449,6 +471,7 @@ def test_tool_definitions_are_strict_with_a_required_reason() -> None:
         "get_setup",
         "measure_at",
         "retake_darks",
+        "view_frame",
         "set_status",
         "evaluate",
         "finish",
@@ -476,5 +499,80 @@ def test_cost_uses_cached_and_contributor_prices() -> None:
 def test_system_prompt_is_short_and_complete() -> None:
     prompt = system_prompt()
     assert len(prompt.split()) < 1500
-    for word in ("ISO 11146-1", "reason", "retake_darks", *VERDICTS):
+    for word in ("ISO 11146-1", "reason", "retake_darks", "view_frame", *VERDICTS):
         assert word in prompt
+
+
+def test_only_the_two_latest_images_are_resent() -> None:
+    client = FakeClient(
+        [
+            _response(
+                _call("measure_at", z_mm=100.0, exposure_ms=1.5),
+                _call("measure_at", z_mm=120.0, exposure_ms=1.5),
+                _call("measure_at", z_mm=140.0, exposure_ms=1.5),
+            ),
+            _response(_call("view_frame", measurement_id="m1")),
+            _response(_call("view_frame", measurement_id="m2")),
+            _response(_call("view_frame", measurement_id="m3")),
+            _response(_call("finish", verdict="measurement_failed", explanation="x")),
+        ]
+    )
+    run_agent(_session(), client)
+    last = _outputs(client.requests[-1])
+    images = [o for o in last if isinstance(o["output"], list)]
+    stubs = [
+        o for o in last if isinstance(o["output"], str) and IMAGE_STUB in o["output"]
+    ]
+    assert len(images) == 2
+    assert len(stubs) == 1 and '"view1-m1"' in stubs[0]["output"]
+    # Earlier requests keep what was actually sent then.
+    assert sum(isinstance(o["output"], list) for o in _outputs(client.requests[3])) == 2
+
+
+def test_images_of_one_batched_turn_all_reach_the_model() -> None:
+    client = FakeClient(
+        [
+            _response(
+                _call("measure_at", z_mm=100.0, exposure_ms=1.5),
+                _call("measure_at", z_mm=120.0, exposure_ms=1.5),
+                _call("measure_at", z_mm=140.0, exposure_ms=1.5),
+            ),
+            _response(
+                _call("view_frame", measurement_id="m1"),
+                _call("view_frame", measurement_id="m2"),
+                _call("view_frame", measurement_id="m3"),
+            ),
+            _response(_call("get_setup")),
+            _response(_call("finish", verdict="measurement_failed", explanation="x")),
+        ]
+    )
+    run_agent(_session(), client)
+    # All three images of the batched turn are sent once ...
+    assert sum(isinstance(o["output"], list) for o in _outputs(client.requests[2])) == 3
+    # ... and only later the oldest becomes a stub.
+    assert sum(isinstance(o["output"], list) for o in _outputs(client.requests[3])) == 2
+
+
+def test_view_frame_can_be_switched_off_for_the_ablation() -> None:
+    client = FakeClient(
+        [
+            _response(
+                _call("get_setup"), _call("measure_at", z_mm=120.0, exposure_ms=1.5)
+            ),
+            _response(_call("view_frame", measurement_id="m1")),
+            _response(_call("finish", verdict="measurement_failed", explanation="x")),
+        ]
+    )
+    session = _session()
+    run = run_agent(session, client, AgentConfig(view_frame=False))
+    request = client.requests[0]
+    assert "view_frame" not in {t["name"] for t in request["tools"]}
+    assert "view_frame" not in request["instructions"]
+    assert "# How to work" in request["instructions"]
+    assert "views_left" not in run.steps[0]["tool_calls"][0]["result"]
+    refused = run.steps[1]["tool_calls"][0]["result"]
+    offered = refused["error"].split("tools: ")[1].split(", ")
+    assert "unknown tool 'view_frame'" in refused["error"]
+    assert "view_frame" not in offered and "measure_at" in offered
+    assert session.views_used == 0
+    assert "Looking at frames" in system_prompt()

@@ -17,8 +17,11 @@ import numpy as np
 from numpy.typing import NDArray
 
 from beampilot.simulator import (
+    Aperture,
     BeamParams,
     CameraConfig,
+    Ghost,
+    HotPixels,
     dark_frame,
     rayleigh_length,
     render_frame,
@@ -81,12 +84,25 @@ class Scenario:
         taken, e.g. ``((4, Faults(extra_background_counts=3.0)),)``.
     min_exposure_ms, max_exposure_ms : float, optional
         Allowed exposure range in ms. Defaults 0.01 and 200.
+    ghost : Ghost, optional
+        Hidden second spot (e.g. a reflection) in every light frame where it
+        is present. Default None.
+    max_views : int, optional
+        Budget of ``view_frame`` calls (separate from positions). Default 4.
+    aperture : Aperture, optional
+        Hidden iris that truncates the beam over a z range. Default None.
+    hot_pixels : HotPixels, optional
+        Defective pixels in every light frame (not in darks). Default None.
+    drift_x_per_measurement_m : float, optional
+        Slow pointing drift: the beam centre moves along x by this many m per
+        measurement taken so far (the first measurement is at 0). Default 0.
 
     Raises
     ------
     ValueError
-        If the stage range is empty, the budget or repeats are below 1, or
-        the exposure range is empty or not positive.
+        If the stage range is empty, the budget or repeats are below 1, the
+        view budget is negative, or the exposure range is empty or not
+        positive.
     """
 
     name: str
@@ -101,14 +117,23 @@ class Scenario:
     fault_schedule: tuple[tuple[int, Faults], ...] = ()
     min_exposure_ms: float = 0.01
     max_exposure_ms: float = 200.0
+    ghost: Ghost | None = None
+    max_views: int = 4
+    aperture: Aperture | None = None
+    hot_pixels: HotPixels | None = None
+    drift_x_per_measurement_m: float = 0.0
 
     def __post_init__(self) -> None:
         if not self.stage_max_m > self.stage_min_m:
             raise ValueError("stage_max_m must be > stage_min_m")
         if self.max_positions < 1 or self.repeats < 1:
             raise ValueError("max_positions and repeats must be >= 1")
+        if self.max_views < 0:
+            raise ValueError("max_views must be >= 0")
         if not 0 < self.min_exposure_ms < self.max_exposure_ms:
             raise ValueError("need 0 < min_exposure_ms < max_exposure_ms")
+        if not np.isfinite(self.drift_x_per_measurement_m):
+            raise ValueError("drift_x_per_measurement_m must be finite")
 
 
 @dataclass
@@ -135,6 +160,8 @@ class Measurement:
         ``"accept"`` or ``"reject"``.
     status : str
         ``"pending"``, ``"accept"`` or ``"reject"``.
+    frame : ndarray of uint16, optional
+        First raw frame of the repeats, in counts (for ``view_frame``).
     """
 
     measurement_id: str
@@ -149,6 +176,7 @@ class Measurement:
     details: dict[str, Any]
     suggested_verdict: str
     status: str = "pending"
+    frame: NDArray[np.uint16] | None = None
 
 
 class MeasurementSession:
@@ -172,6 +200,10 @@ class MeasurementSession:
         self.log: list[dict[str, Any]] = []
         self.report: dict[str, Any] | None = None
         self.positions_used = 0
+        self.views_used = 0
+        # PNG data URLs from view_frame, handed to the agent loop by id and
+        # never written to logs or run files.
+        self.images: dict[str, str] = {}
         self.dark_sets_taken = 0
         self.last_frame: NDArray[np.int32] | None = None
         # Each switch of the faults, for the run file: when and what.
@@ -191,6 +223,11 @@ class MeasurementSession:
     def wavelength_m(self) -> float:
         """Laser wavelength in m: known to the experimenter, not hidden."""
         return self.scenario.beam.wavelength_m
+
+    @property
+    def views_left(self) -> int:
+        """Remaining ``view_frame`` budget."""
+        return self.scenario.max_views - self.views_used
 
     @property
     def positions_left(self) -> int:
@@ -282,8 +319,19 @@ class MeasurementSession:
             self.set_faults(**pending)
             self._record_faults("operator")
         camera = self._camera_with_faults()
+        x0_m = self.scenario.drift_x_per_measurement_m * len(self.measurements)
         frames = [
-            render_frame(self.scenario.beam, camera, z_m, exposure_ms, self._rng)
+            render_frame(
+                self.scenario.beam,
+                camera,
+                z_m,
+                exposure_ms,
+                self._rng,
+                x0_m=x0_m,
+                ghost=self.scenario.ghost,
+                aperture=self.scenario.aperture,
+                hot_pixels=self.scenario.hot_pixels,
+            )
             for _ in range(self.scenario.repeats)
         ]
         self.last_frame = frames[0]
@@ -372,6 +420,32 @@ def reveal_truth(session: MeasurementSession) -> dict[str, float | str]:
         truth[f"z0_{axis}_mm"] = z0 * 1e3
         truth[f"z_r_{axis}_mm"] = rayleigh_length(d0, m2, beam.wavelength_m) * 1e3
         truth[f"m2_{axis}"] = m2
+    ghost = session.scenario.ghost
+    if ghost is not None:
+        window = (
+            "everywhere"
+            if not np.isfinite(ghost.z_min_m) and not np.isfinite(ghost.z_max_m)
+            else f"{ghost.z_min_m * 1e3:g}-{ghost.z_max_m * 1e3:g} mm"
+        )
+        truth["ghost"] = (
+            f"{ghost.relative_power:.0%} power at ({ghost.offset_x_m * 1e3:+.2f}, "
+            f"{ghost.offset_y_m * 1e3:+.2f}) mm from the beam, {window}"
+        )
+    aperture = session.scenario.aperture
+    if aperture is not None:
+        truth["aperture"] = (
+            f"iris of {aperture.radius_m * 1e3:g} mm radius for "
+            f"{aperture.z_min_m * 1e3:g}-{aperture.z_max_m * 1e3:g} mm"
+        )
+    hot = session.scenario.hot_pixels
+    if hot is not None:
+        truth["hot_pixels"] = (
+            f"{len(hot.pixels)} pixels (row, column) {list(hot.pixels)} with "
+            f"+{hot.extra_counts:g} counts in light frames"
+        )
+    drift = session.scenario.drift_x_per_measurement_m
+    if drift:
+        truth["drift"] = f"beam centre x moves {drift * 1e6:+g} um per measurement"
     return truth
 
 
@@ -462,6 +536,36 @@ def different_waists_scenario(seed: int = 0) -> Scenario:
     return _scenario("different_waists", seed, beam=beam)
 
 
+def ghost_everywhere_scenario(seed: int = 0) -> Scenario:
+    """Clean beam with a reflection (15 % power, 0.54 mm away) at every z.
+
+    The widths include the ghost wherever it falls inside the iterated 3·d
+    integration area: always away from the waist; near the waist it depends
+    on the frame, because 15 % is close to the 1/e² start threshold. No
+    caustic of true ISO widths can be built. Expected verdict:
+    measurement_failed, with the ghost named as the cause.
+    """
+    ghost = Ghost(relative_power=0.15, offset_x_m=0.45e-3, offset_y_m=-0.30e-3)
+    return _scenario("ghost_everywhere", seed, ghost=ghost)
+
+
+def ghost_in_range_scenario(seed: int = 0) -> Scenario:
+    """Clean beam with a reflection (15 % power, 0.5 mm away) for 150-200 mm.
+
+    Measurements in that range are wrong; ISO coverage is still possible with
+    near points around the 120 mm waist and far points below ~70 mm and above
+    200 mm. Expected verdict: iso_compliant, with the ghost positions rejected.
+    """
+    ghost = Ghost(
+        relative_power=0.15,
+        offset_x_m=0.5e-3,
+        offset_y_m=0.0,
+        z_min_m=0.150,
+        z_max_m=0.200,
+    )
+    return _scenario("ghost_in_range", seed, ghost=ghost)
+
+
 SCENARIOS = {
     "clean": clean_scenario,
     "partial_saturation": partial_saturation_scenario,
@@ -469,6 +573,8 @@ SCENARIOS = {
     "beam_too_large": beam_too_large_scenario,
     "waist_outside_range": waist_outside_range_scenario,
     "different_waists": different_waists_scenario,
+    "ghost_everywhere": ghost_everywhere_scenario,
+    "ghost_in_range": ghost_in_range_scenario,
 }
 
 # Ranges of the mystery beam. zR and M² are drawn and d0 follows from
@@ -531,6 +637,12 @@ def random_scenario(seed: int = 0) -> Scenario:
     return _scenario("mystery", seed, **settings)
 
 
+def _ghost_record(ghost: Ghost | None) -> dict[str, Any] | None:
+    if ghost is None:
+        return None
+    return {k: (v if np.isfinite(v) else None) for k, v in asdict(ghost).items()}
+
+
 def session_record(session: MeasurementSession) -> dict[str, Any]:
     """What a run file keeps besides the agent's steps (for replay and review).
 
@@ -554,6 +666,15 @@ def session_record(session: MeasurementSession) -> dict[str, Any]:
             "camera": asdict(scenario.camera),
             "stage_min_m": scenario.stage_min_m,
             "stage_max_m": scenario.stage_max_m,
+            # asdict keeps +-inf for an unlimited z window; JSON needs null.
+            "ghost": _ghost_record(scenario.ghost),
+            "aperture": None
+            if scenario.aperture is None
+            else asdict(scenario.aperture),
+            "hot_pixels": (
+                None if scenario.hot_pixels is None else asdict(scenario.hot_pixels)
+            ),
+            "drift_x_per_measurement_m": scenario.drift_x_per_measurement_m,
             "faults": asdict(scenario.faults),
             "fault_schedule": [
                 {"after_measurements": n, "faults": asdict(f)}

@@ -35,7 +35,7 @@ The model chooses the order of actions; the controller only enforces limits.
   easier for the model to read. Conversion happens only at the tool boundary.
 - A known-answer test checks M² end to end, so a unit error (for example a factor 10³) fails.
 
-## 4. Tools (6 core)
+## 4. Tools (7 core)
 
 Every tool has a required `reason` string. Tool schemas are strict, and verdicts are enums.
 
@@ -85,10 +85,17 @@ Every tool has a required `reason` string. Tool schemas are strict, and verdicts
    - Blocks the beam and takes a fresh dark set (50 frames) with the current background, so a
      background change (e.g. room light switched on) becomes part of the dark.
    - Costs one position from the budget. Use it when `measure_at` reports `background_changed`.
+7. `view_frame(measurement_id, reason)`
+   - Optional. Returns the first frame of a measurement as a PNG image for the model (Muse
+     Spark image input), on a square-root brightness scale, so the agent can see what the
+     second moments hide (e.g. a ghost reflection).
+   - Separate small budget (4 views per run), no position cost. The image goes to the model
+     inside the tool output and is not stored in logs or run files.
+   - Only the 2 most recent images stay in the resent history; older ones become a text
+     stub. `AgentConfig(view_frame=False)` switches the tool off (evaluation ablation).
 
-Stretch tools (only after the core works): `change_lens(f_mm, reason)` for an inaccessible
-waist (ISO uses an artificial waist made with an aberration-free lens, and M² stays the same),
-and `view_frame(measurement_id, reason)` for a ghost-reflection scenario using Muse Spark image input.
+Stretch tool (only after the core works): `change_lens(f_mm, reason)` for an inaccessible
+waist (ISO uses an artificial waist made with an aberration-free lens, and M² stays the same).
 
 ## 5. Loop guidance (in the system prompt)
 
@@ -136,7 +143,12 @@ Core:
 5. Waist outside the stage range → `waist_not_accessible` with explanation.
 6. Different waist positions in x and y (simple astigmatism). All code is per-axis from day one.
 
-Stretch: ghost reflection (+ `view_frame`), `change_lens`, general astigmatism detection demo.
+Ghost reflection (with `view_frame`): `ghost_everywhere` (expected `measurement_failed`) and
+`ghost_in_range` (expected `iso_compliant` after rejecting the ghost positions).
+Held-out faults for evaluation only (not in `SCENARIOS`): iris aperture over a z range,
+hot pixels, pointing drift (see `docs/evaluation-plan.md`).
+
+Stretch: `change_lens`, general astigmatism detection demo.
 
 Demo features: fault buttons the judge can press during a run, a "mystery beam" button with
 random hidden parameters (ground truth shown at the end), and a replay mode for recorded runs.

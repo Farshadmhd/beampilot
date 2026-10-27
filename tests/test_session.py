@@ -149,6 +149,20 @@ def test_schedule_does_not_undo_an_operator_fault() -> None:
     assert [e["source"] for e in session.fault_events] == ["schedule", "operator"]
 
 
+def test_ghost_scenarios_put_the_ghost_where_promised() -> None:
+    everywhere = MeasurementSession(SCENARIOS["ghost_everywhere"]())
+    in_range = MeasurementSession(SCENARIOS["ghost_in_range"]())
+    assert "everywhere" in reveal_truth(everywhere)["ghost"]
+    assert "150-200 mm" in reveal_truth(in_range)["ghost"]
+    record = session_record(everywhere)
+    json.dumps(record, allow_nan=False)  # an unlimited window is stored as null
+    assert record["scenario_params"]["ghost"]["z_min_m"] is None
+    # The ghost changes the frame only inside its z window.
+    ghost = in_range.scenario.ghost
+    assert ghost.present_at(0.175) and not ghost.present_at(0.120)
+    assert reveal_truth(MeasurementSession(clean_scenario())).get("ghost") is None
+
+
 def test_session_record_holds_what_replay_needs() -> None:
     session = MeasurementSession(clean_scenario())
     record = session_record(session)
@@ -187,3 +201,39 @@ def test_reveal_truth_in_display_units() -> None:
     assert truth["z0_x_mm"] == pytest.approx(120.0)
     assert truth["m2_x"] == 1.2
     assert 20 < truth["z_r_x_mm"] < 30
+
+
+def test_drift_moves_the_beam_per_measurement() -> None:
+    from dataclasses import replace
+
+    from beampilot.tools import measure_at
+
+    drift = 25e-6
+    session = MeasurementSession(
+        replace(clean_scenario(3), drift_x_per_measurement_m=drift)
+    )
+    first = measure_at(session, 120.0, 1.0, "test")
+    for _ in range(3):
+        last = measure_at(session, 120.0, 1.0, "test")
+    shift_um = last["details"]["centroid_um"][0] - first["details"]["centroid_um"][0]
+    assert shift_um == pytest.approx(3 * drift * 1e6, abs=1.0)
+    assert "+25 um" in reveal_truth(session)["drift"]
+
+
+def test_new_faults_are_recorded_for_replay() -> None:
+    from dataclasses import replace
+
+    from beampilot.simulator import Aperture, HotPixels
+
+    scenario = replace(
+        clean_scenario(),
+        aperture=Aperture(radius_m=0.35e-3, z_min_m=0.03, z_max_m=0.07),
+        hot_pixels=HotPixels(pixels=((40, 470),), extra_counts=2500.0),
+    )
+    session = MeasurementSession(scenario)
+    record = session_record(session)
+    json.dumps(record, allow_nan=False)
+    assert record["scenario_params"]["aperture"]["radius_m"] == 0.35e-3
+    assert record["scenario_params"]["hot_pixels"]["extra_counts"] == 2500.0
+    truth = reveal_truth(session)
+    assert "30-70 mm" in truth["aperture"] and "(40, 470)" in truth["hot_pixels"]

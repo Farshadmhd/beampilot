@@ -1,4 +1,4 @@
-"""The six agent tools (design section 4), as plain functions on a session.
+"""The seven agent tools (design section 4), as plain functions on a session.
 
 Every tool takes a required `reason` (``finish`` uses its `explanation`),
 returns a JSON-serialisable dict, and never raises: bad input gives
@@ -12,6 +12,7 @@ session everything is SI. Every call, including failed ones, is appended to
 
 from __future__ import annotations
 
+import base64
 import inspect
 import traceback
 from collections.abc import Callable
@@ -22,6 +23,7 @@ import numpy as np
 from scipy.special import erf
 
 from beampilot.caustic import CausticFit, coverage, fit_caustic, general_astigmatism
+from beampilot.plots import frame_png
 from beampilot.session import N_DARK_FRAMES, Measurement, MeasurementSession
 from beampilot.widths import (
     DEFAULT_CORNER_FRACTION,
@@ -145,12 +147,13 @@ def get_setup(session: MeasurementSession, reason: str) -> dict[str, Any]:
     dict
         Wavelength in nm, stage range in mm, pixel size in um, sensor size in
         px and mm, full scale in counts, exposure range in ms, repeats per
-        position, position budget, and the smallest beam width in um that
-        still has 20 pixels across it.
+        position, position budget, the smallest beam width in um that still
+        has 20 pixels across it, and the ``view_frame`` budget left (only if
+        the run has one).
     """
     scenario, camera = session.scenario, session.camera
     pixel_um = camera.pixel_size_m * 1e6
-    return {
+    setup: dict[str, Any] = {
         "wavelength_nm": _num(session.wavelength_m * 1e9, 3),
         "stage_range_mm": [
             _num(scenario.stage_min_m * 1e3, 3),
@@ -169,6 +172,9 @@ def get_setup(session: MeasurementSession, reason: str) -> dict[str, Any]:
         "positions_left": session.positions_left,
         "min_beam_width_um": _num(MIN_PIXELS_ACROSS * pixel_um, 1),
     }
+    if scenario.max_views > 0:  # no view budget: the tool is not offered
+        setup["views_left"] = session.views_left
+    return setup
 
 
 @_tool()
@@ -248,7 +254,8 @@ def measure_at(
     pixel_m = camera.pixel_size_m
     widths, peaks, offsets, offset_ratios, saturation = [], [], [], [], []
     in_corners = []
-    for raw in session.take_frames(z_m, exposure_ms):
+    frames = session.take_frames(z_m, exposure_ms)
+    for raw in frames:
         saturation.append(float(np.mean(raw >= camera.full_scale_counts)))
         image, background = subtract_background(raw, session.dark_mean)
         width = measure_widths(image, pixel_m)
@@ -320,6 +327,7 @@ def measure_at(
         flags=flags,
         details=details,
         suggested_verdict="reject" if reasons else "accept",
+        frame=frames[0].astype(np.uint16),  # 12-bit counts: half the memory
     )
     session.add_measurement(measurement)
     return {
@@ -341,6 +349,66 @@ def measure_at(
         "reasons": reasons,
         "warnings": warnings,
         "details": details,
+    }
+
+
+@_tool()
+def view_frame(
+    session: MeasurementSession, measurement_id: str, reason: str
+) -> dict[str, Any]:
+    """Look at one camera frame of a measurement, as an image.
+
+    Optional. Returns the first of the measurement's repeated frames as a PNG
+    on a square-root brightness scale (black = dark level, yellow = full
+    scale), which shows structure the second-moment numbers cannot: extra
+    spots, odd shapes, background patterns, clipping. Uses a small separate
+    budget (``max_views``, default 4), not positions.
+
+    The image travels to the model next to this result (the agent loop
+    attaches it by ``image_id``); logs and run files keep only this dict.
+
+    Parameters
+    ----------
+    session : MeasurementSession
+        The run.
+    measurement_id : str
+        Id returned by ``measure_at``, e.g. ``"m3"``.
+    reason : str
+        Why the agent wants to look.
+
+    Returns
+    -------
+    dict
+        Measurement id, z in mm, exposure in ms, image size in px, the
+        brightness scale, views left, and ``image_id``.
+    """
+    measurement = session.measurements.get(measurement_id)
+    if measurement is None:
+        known = ", ".join(session.measurements) or "none yet"
+        raise ToolInputError(
+            f"unknown measurement_id {measurement_id!r}; known ids: {known}"
+        )
+    if session.views_left <= 0:
+        raise ToolInputError(
+            f"view budget used up ({session.scenario.max_views} views per run)"
+        )
+    if measurement.frame is None:
+        raise ToolInputError(f"{measurement_id} has no stored frame")
+    camera = session.camera
+    png = frame_png(measurement.frame, camera.full_scale_counts, camera.offset_counts)
+    session.views_used += 1
+    image_id = f"view{session.views_used}-{measurement_id}"
+    session.images[image_id] = "data:image/png;base64," + base64.b64encode(png).decode()
+    return {
+        "measurement_id": measurement_id,
+        "z_mm": _num(measurement.z_m * 1e3, 3),
+        "exposure_ms": _num(measurement.exposure_ms, 4),
+        "image_px": [camera.nx, camera.ny],
+        "pixel_size_um": _num(camera.pixel_size_m * 1e6, 3),
+        "brightness_scale": "square root: black = dark level, yellow = full scale",
+        "orientation": "row 0 at the top; +x to the right, +y down (as centroid_um)",
+        "views_left": session.views_left,
+        "image_id": image_id,
     }
 
 
