@@ -80,6 +80,43 @@ def test_scripted_handles_very_bright_and_very_dim_beams(power_factor: float) ->
     assert accepted >= 4
 
 
+def test_scripted_finds_a_waist_outside_the_scout_span() -> None:
+    """Waist at 25 mm: inside the stage, below the first scout (31 mm)."""
+    base = clean_scenario()
+    beam = replace(base.beam, z0x_m=0.025, z0y_m=0.025)
+    session = MeasurementSession(replace(base, beam=beam))
+    report = scripted_iso(session)["report"]
+    assert report["verdict"] == "iso_compliant"
+    truth = reveal_truth(session)
+    for axis in ("x", "y"):
+        m2 = report["evaluation"][axis]["m2"]
+        assert m2 == pytest.approx(truth[f"m2_{axis}"], rel=0.03)
+
+
+def test_scripted_gives_up_at_the_exposure_limit() -> None:
+    """1000x brighter: no identical repeats at the minimum exposure."""
+    scenario = replace(clean_scenario(), faults=Faults(power_factor=1000.0))
+    session = MeasurementSession(scenario)
+    scripted_iso(session)
+    calls = [
+        (m["arguments"]["z_mm"], m["arguments"]["exposure_ms"])
+        for m in _tool_calls(session, "measure_at")
+    ]
+    assert len(calls) == len(set(calls)), "same position and exposure measured twice"
+
+
+def test_exposure_after_survives_missing_widths() -> None:
+    session = MeasurementSession(clean_scenario())
+    operator = baselines._ScriptedOperator(session)
+    result = {
+        "flags": {"saturated": True, "low_signal": False},
+        "details": {"saturated_pixel_fraction": 0.01},
+        "d_x_um": {"mean": None},
+        "d_y_um": {"mean": None},
+    }
+    assert operator._exposure_after(result, 10.0) == pytest.approx(10.0 * 0.35)
+
+
 def test_exposure_from_a_saturated_peak_estimate() -> None:
     """Saturated area of a Gaussian gives the true peak: exp(N p² / 2 pi sx sy)."""
     session = MeasurementSession(clean_scenario())

@@ -35,7 +35,9 @@ TARGET_PEAK_FRACTION = 0.7  # aimed peak, as a fraction of full scale
 START_EXPOSURE_MS = 1.0  # first exposure before anything is known
 MAX_EXPOSURE_STEP = 50.0  # largest exposure increase per retry
 MAX_TRIES = 3  # measurements per position
-NEAR_OFFSETS = (-0.8, -0.4, 0.0, 0.4, 0.8)  # in zR
+# In zR. The first five are preferred; the rest are used only if some of those
+# fall off the stage (waist close to a stage end).
+NEAR_OFFSETS = (-0.8, -0.4, 0.0, 0.4, 0.8, -0.6, 0.6, -0.2, 0.2, -0.95, 0.95)
 # Far points start at 2.3 zR so a refit (zR shifts by a few %) keeps them
 # beyond 2 zR; existing points count as far from FAR_COUNT_ZR when planning.
 FAR_OFFSETS = (2.3, -2.3, 2.6, -2.6, 2.9, -2.9, 3.2, -3.2, 3.6, -3.6, 4.0, -4.0)
@@ -45,6 +47,7 @@ MIN_SPACING_ZR = 0.15  # skip planned positions closer than this to others
 # smaller sensor side (0.5: sensor edges beyond +-4 sigma, clipping < 0.02 %).
 MAX_D_PER_SENSOR = 0.5
 PLACEMENT_ROUNDS = 2
+EXTEND_ROUNDS = 3  # measurements towards a waist outside the measured span
 # Warning that makes the scripted operator reject a measurement anyway: beam
 # light in the corner patches biases the background offset.
 CAUTIOUS_REJECT_FLAGS = ("beam_in_corners",)
@@ -160,6 +163,14 @@ def scripted_iso(session: MeasurementSession) -> dict[str, Any]:
     operator = _ScriptedOperator(session)
     operator.scout()
     evaluation = evaluate(session, "Scripted: first fit from the scout positions.")
+    # A waist inside the stage but outside the measured span is reported as
+    # not determined: measure towards it until the waist lies inside the span.
+    for _ in range(EXTEND_ROUNDS):
+        if not operator.extend_towards_waist(evaluation):
+            break
+        evaluation = evaluate(
+            session, "Scripted: refit after measuring nearer the waist."
+        )
     for _ in range(PLACEMENT_ROUNDS):
         if evaluation.get("status") != "ok" or evaluation["iso_coverage_met"]:
             break
@@ -242,6 +253,38 @@ class _ScriptedOperator:
         s = smallest["z_mm"]
         return any((s < t <= z_mm) or (z_mm <= t < s) for t in too_large)
 
+    def extend_towards_waist(self, evaluation: dict[str, Any]) -> bool:
+        """Measure halfway between the measured span and the stage end on the
+        side where the fit puts a waist that is inside the stage.
+
+        Returns True if a measurement was taken.
+        """
+        if evaluation.get("status") != "ok" or not self.good:
+            return False
+        sides = [
+            evaluation[axis]["waist_side"]
+            for axis in ("x", "y")
+            if evaluation[axis].get("waist_side")
+            and evaluation[axis]["waist_in_stage_range"]
+        ]
+        if not sides or not self._has_budget(2):
+            return False
+        z_min, z_max = self.setup["stage_range_mm"]
+        good_z = self._good_z()
+        if sides[0] == "below":
+            edge, end = min(good_z), z_min
+        else:
+            edge, end = max(good_z), z_max
+        target = round(0.5 * (edge + end), 1)
+        if abs(target - edge) < 1.0:
+            target = end
+        if any(abs(target - z) < 1.0 for z in self.measured_z):
+            return False
+        self.measure(
+            target, f"Scripted: the fit puts the waist {sides[0]} the measured span."
+        )
+        return True
+
     def plan_positions(self, evaluation: dict[str, Any]) -> list[float]:
         """Missing near and far positions per axis, from the current fit."""
         self.fit = evaluation
@@ -268,8 +311,11 @@ class _ScriptedOperator:
                         continue
                     if not self._fits_sensor(z_mm, evaluation):
                         continue
+                    # Spacing also against failed positions: no re-tries there.
                     spacing = MIN_SPACING_ZR * z_r
-                    if any(abs(z_mm - z) < spacing for z in taken + near + far):
+                    if any(
+                        abs(z_mm - z) < spacing for z in self.measured_z + near + far
+                    ):
                         continue
                     out.append(z_mm)
                     have += 1
@@ -281,7 +327,7 @@ class _ScriptedOperator:
         """Measure with exposure correction; accept or reject. None on error."""
         exposure = self._first_exposure(z_mm)
         darks_retaken = False
-        for _ in range(MAX_TRIES):
+        for attempt in range(MAX_TRIES):
             if not self._has_budget(1):
                 return None
             result = measure_at(self.session, z_mm, exposure, reason)
@@ -303,10 +349,19 @@ class _ScriptedOperator:
                 self._reject(result, "Beam too large for the sensor here.")
                 return result
             if flags["saturated"] or flags["low_signal"]:
-                exposure = self._exposure_after(result, exposure)
-                self.exposure_hint = exposure
-                problem = "saturated" if flags["saturated"] else "low signal"
-                self._reject(result, f"{problem.capitalize()}: retry at {exposure} ms.")
+                problem = "Saturated" if flags["saturated"] else "Low signal"
+                new_exposure = self._exposure_after(result, exposure)
+                self.exposure_hint = new_exposure
+                if new_exposure == exposure:
+                    # Clamped at the camera's exposure limit: a repeat would
+                    # give the same result, so give the position up.
+                    self._reject(result, f"{problem} at the exposure limit; giving up.")
+                    return result
+                if attempt == MAX_TRIES - 1:
+                    self._reject(result, f"{problem}; no tries left here.")
+                    return result
+                exposure = new_exposure
+                self._reject(result, f"{problem}: retry at {exposure} ms.")
                 continue
             cautious = [f for f in CAUTIOUS_REJECT_FLAGS if flags[f]]
             if result["suggested_verdict"] == "reject" or cautious:
@@ -334,9 +389,9 @@ class _ScriptedOperator:
             nx, ny = self.setup["sensor_px"]
             n_saturated = result["details"]["saturated_pixel_fraction"] * nx * ny
             pixel_um = self.setup["pixel_size_um"]
-            sigma_x = result["d_x_um"]["mean"] / 4.0
-            sigma_y = result["d_y_um"]["mean"] / 4.0
-            if sigma_x and sigma_y:
+            d_x, d_y = result["d_x_um"]["mean"], result["d_y_um"]["mean"]
+            if d_x and d_y:  # None if the widths could not be measured
+                sigma_x, sigma_y = d_x / 4.0, d_y / 4.0
                 exponent = n_saturated * pixel_um**2 / (2 * np.pi * sigma_x * sigma_y)
                 peak = self.full_scale * float(np.exp(min(exponent, 50.0)))
             else:
