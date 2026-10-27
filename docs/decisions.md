@@ -42,6 +42,23 @@ second moments on several near-waist frames. The thresholded pixels only choose
 the starting rectangle; they never enter the reported widths. Whether ISO/TR 11146-3
 prescribes a specific starting area: unverified.
 
+Kept after the physics review. For a single-lobe beam the start cannot bias the
+result: the 1/e² estimate is ~0.83 d, so the first rectangle spans ±5σ and the
+iteration climbs to the same fixed point a full-image start descends to. Two known
+limits: (1) with a strong halo or a ghost spot there can be two fixed points, and this
+start finds the core while a full-image start would include the ghost; (2) a single
+hot pixel brighter than ~7× the beam peak makes the start fall back to the full
+image. Neither occurs in the simulator yet; a 3 × 3 median before taking the peak
+would address (2).
+
+## 2026-10-27: Compare astigmatism azimuths modulo 90 degrees
+
+`measure_widths` reports the azimuth of the major principal axis. A beam with simple
+astigmatism (different x and y waist positions) swaps major and minor axis where
+d_x = d_y, so its azimuth jumps from 90° to 0° although the axes never rotate.
+`general_astigmatism` therefore compares azimuths modulo 90°: only the pair of axes
+matters. Comparing modulo 180° flagged design scenario 6 as general astigmatism.
+
 ## 2026-10-27: ISO point coverage means at least 5 near and 5 far, per axis
 
 ISO 11146-1 asks for at least 10 positions, "about half" within one Rayleigh length
@@ -61,3 +78,12 @@ errors, still shows up in the uncertainty. With 2 % simulated noise the reported
 uncertainty matched the actual scatter over 300 seeds within ~10 %. Sampling only
 near the waist inflates the M² uncertainty by ~6× at ±0.5 zR, ~3× at ±0.7 zR and
 only ~1.8× at ±1 zR, compared with ISO sampling; no bias was seen at 2 % noise.
+
+## 2026-10-27: The agent pipeline fits with relative residuals
+
+`evaluate` calls `fit_caustic` with `d_std_m=None`, i.e. relative residuals
+(d_model − d) / d. Reason: the std of only 5 repeats scatters by ~35 %, so a lucky low
+std gives one position several times the weight. In a test with 2 % noise per frame,
+5 repeats at 10 ISO positions and 300 seeds, the weighted fit's M² scattered by
+0.0080 against 0.0068 unweighted (~18 % noisier), with no bias in either. The
+weighted option stays in `fit_caustic` for callers with better std estimates.
