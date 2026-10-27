@@ -30,6 +30,9 @@ Repository = "https://github.com/Farshadmhd/beampilot"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+beampilot = ["prompts/*.md"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
