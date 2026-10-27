@@ -67,7 +67,8 @@ class Scenario:
     stage_min_m, stage_max_m : float
         Stage travel along z in m.
     max_positions : int
-        Budget of ``measure_at`` calls.
+        Position budget: each ``measure_at`` call and each dark retake
+        costs one.
     repeats : int, optional
         Frames per position. Default 5 (ISO 11146-1 asks for at least 5).
     seed : int, optional
@@ -233,9 +234,7 @@ class MeasurementSession:
         list of ndarray of int32
             ``scenario.repeats`` raw frames in counts.
         """
-        for after_n, faults in self.scenario.fault_schedule:
-            if len(self.measurements) == after_n:
-                self.faults = faults
+        self._apply_fault_schedule()
         camera = self._camera_with_faults()
         return [
             render_frame(self.scenario.beam, camera, z_m, exposure_ms, self._rng)
@@ -260,7 +259,15 @@ class MeasurementSession:
         """Identifier for the next measurement: ``"m1"``, ``"m2"``, ..."""
         return f"m{len(self.measurements) + 1}"
 
+    def _apply_fault_schedule(self) -> None:
+        """Switch to a scheduled fault once its measurement count is reached."""
+        for after_n, faults in self.scenario.fault_schedule:
+            if len(self.measurements) == after_n:
+                self.faults = faults
+
     def _take_dark_set(self) -> NDArray[np.float64]:
+        # Darks taken at the switch-over must already see the new background.
+        self._apply_fault_schedule()
         camera = self._camera_with_faults()
         self.dark_sets_taken += 1
         return mean_dark([dark_frame(camera, self._rng) for _ in range(N_DARK_FRAMES)])
@@ -366,13 +373,15 @@ def background_drift_scenario(seed: int = 0) -> Scenario:
 
 
 def beam_too_large_scenario(seed: int = 0) -> Scenario:
-    """d0 300 um, M² 1.5, zR ~ 44 mm: far-field points must stay in a narrow window.
+    """d0 300 um, M² 1.5, zR ~ 44 mm: far-field beams outgrow the 3 x d area.
 
-    The 3 x d area leaves the 2.8 mm sensor from about 3 zR (d ~ 0.94 mm),
-    and the stage reaches 4.5 zR, so naive far points are clipped. Positions
-    between 2 and ~2.8 zR on both sides of the waist still give 5 near + 5
-    far without clipping, so the expected verdict is ``iso_compliant``
-    through that narrow window, not a failure.
+    The 3 x d area leaves the 2.8 mm sensor from about 3 zR (d ~ 0.94 mm) and
+    the stage reaches 4.5 zR (d ~ 1.4 mm). The estimated clipping loss stays
+    far below 1 % over the whole stage, so far points beyond 3 zR only get
+    the ``roi_clipped`` warning, not a reject. An operator that avoids that
+    warning still finds 5 + 5 positions in the window between 2 and ~2.8 zR
+    on both sides. Either way the expected verdict is ``iso_compliant``, not
+    a failure.
     """
     beam = _beam(d0x_m=0.30e-3, d0y_m=0.30e-3, z0x_m=0.200, z0y_m=0.200)
     beam = replace(beam, m2x=1.5, m2y=1.5)

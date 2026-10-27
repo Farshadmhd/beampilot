@@ -26,6 +26,7 @@ from beampilot.session import N_DARK_FRAMES, Measurement, MeasurementSession
 from beampilot.widths import (
     DEFAULT_CORNER_FRACTION,
     Roi,
+    WidthResult,
     measure_widths,
     subtract_background,
     width_statistics,
@@ -39,6 +40,9 @@ MIN_PIXELS_ACROSS = 20  # ISO 11146-1: at least 20 px across the beam width
 BACKGROUND_SIGMA_LIMIT = 4.0
 ALIGNMENT_LIMIT_DEG = 10.0  # principal axes vs lab x/y
 MAX_CLIPPING_LOSS = 0.01  # ISO 11146-1: power outside the sensor below 1 %
+# Modelled beam light in the corner patches, in offset standard errors, from
+# which the offset counts as beam light rather than background.
+CORNER_LIGHT_SIGMA = 1.0
 CIRCULAR_THRESHOLD = 0.87  # ellipticity above this: circular (unverified, ISO)
 MIN_FIT_POSITIONS = 4
 
@@ -62,9 +66,9 @@ REJECT_FLAGS = {
 WARNING_FLAGS = {
     "roi_clipped": "the 3 x d integration area is cut by the sensor edge "
     "(estimated clipping loss below 1 %)",
-    "beam_in_corners": "the beam area reaches the corner patches used for the "
-    "background offset: beam light there inflates the offset and biases widths "
-    "low; centre the beam or measure where it is smaller",
+    "beam_in_corners": "beam light reaches the corner patches used for the "
+    "background offset: it inflates the offset and biases widths low; centre "
+    "the beam or measure where it is smaller",
     "background_changed": "background differs from the dark frames "
     "(corrected by the corner offset, but check the setup)",
     "axes_not_aligned": "elliptical beam not aligned to x/y: lab-axis widths "
@@ -182,8 +186,10 @@ def measure_at(
     - ``not_converged``: a frame's width iteration failed or did not settle.
     - ``roi_clipped``: the 3 x d integration area hit the sensor edge.
     - ``beam_in_corners``: in some frame the converged 3 x d rectangle
-      overlaps a corner patch used for the fine offset, so beam light may
-      inflate the offset.
+      overlaps a corner patch used for the fine offset and a Gaussian with
+      the measured centroid, widths and signal puts at least one offset
+      standard error of light into the corner patches, so the offset is
+      inflated by beam light.
     - ``background_changed``: in some frame without beam in the corners,
       |residual offset| exceeds 4 times its standard error, i.e. the
       background is no longer the one in the dark frames. The 4 sigma limit
@@ -248,7 +254,11 @@ def measure_at(
         offset_ratios.append(
             abs(background.offset_counts) / background.offset_std_err_counts
         )
-        in_corners.append(_roi_in_corners(width.roi, camera.nx, camera.ny))
+        light = _corner_beam_light_counts(width, camera.nx, camera.ny, pixel_m)
+        in_corners.append(
+            _roi_in_corners(width.roi, camera.nx, camera.ny)
+            and light >= CORNER_LIGHT_SIGMA * background.offset_std_err_counts
+        )
     stats = width_statistics(widths)
     clipping_loss = _clipping_loss(
         float(np.mean([w.x_c_m for w in widths])),
@@ -638,6 +648,32 @@ def _roi_in_corners(roi: Roi, nx: int, ny: int) -> bool:
     reaches_x_band = roi.x_start < cx or roi.x_stop > nx - cx
     reaches_y_band = roi.y_start < cy or roi.y_stop > ny - cy
     return reaches_x_band and reaches_y_band
+
+
+def _corner_beam_light_counts(
+    width: WidthResult, nx: int, ny: int, pixel_m: float
+) -> float:
+    """Mean beam light over the four corner patches, in counts per pixel.
+
+    Models the beam as a Gaussian with the frame's centroid, sigmas (d / 4)
+    and summed signal, evaluated at the corner-patch pixel centres, i.e. the
+    amount by which beam light raises the fine offset. 0 if the widths are
+    not valid.
+    """
+    sigma_x, sigma_y = width.d_x_m / 4.0, width.d_y_m / 4.0
+    if not (sigma_x > 0 and sigma_y > 0 and width.roi_sum_counts > 0):
+        return 0.0
+    peak = width.roi_sum_counts * pixel_m**2 / (2.0 * np.pi * sigma_x * sigma_y)
+    cx = max(1, round(DEFAULT_CORNER_FRACTION * nx))
+    cy = max(1, round(DEFAULT_CORNER_FRACTION * ny))
+    columns = np.r_[np.arange(cx), np.arange(nx - cx, nx)]
+    rows = np.r_[np.arange(cy), np.arange(ny - cy, ny)]
+    x = (columns - (nx - 1) / 2.0) * pixel_m - width.x_c_m
+    y = (rows - (ny - 1) / 2.0) * pixel_m - width.y_c_m
+    # The four patches are all (row, column) pairs of the two edge bands.
+    profile_x = np.exp(-0.5 * (x / sigma_x) ** 2)
+    profile_y = np.exp(-0.5 * (y / sigma_y) ** 2)
+    return float(peak * profile_x.mean() * profile_y.mean())
 
 
 def _median_misalignment_deg(widths: list) -> float:

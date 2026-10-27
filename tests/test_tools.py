@@ -31,6 +31,7 @@ from beampilot.tools import (
 from beampilot.widths import Roi, WidthResult
 
 REASON = "test"
+PIXEL_M = 5.5e-6
 # Offsets from the waist in units of the x Rayleigh length: 5 near, 5 far.
 ISO_OFFSETS = np.array([-3.0, -2.3, -0.8, -0.4, 0.0, 0.4, 0.8, 2.3, 3.0, 3.6])
 
@@ -278,6 +279,18 @@ def test_retake_darks_clears_background_changed() -> None:
     assert after["details"]["residual_offset_counts"] == pytest.approx(0.0, abs=0.3)
 
 
+def test_retake_darks_at_the_switch_over_sees_the_new_background() -> None:
+    """Room light is scheduled after 4 measurements; darks retaken right then
+    must include it, or the retake is wasted."""
+    session = MeasurementSession(background_drift_scenario())
+    for _ in range(4):
+        measure_at(session, 120.0, _exposure_ms(session, 120.0), REASON)
+    retake = retake_darks(session, "before the next measurement")
+    assert retake["mean_dark_counts"] == pytest.approx(103.0, abs=0.1)
+    after = measure_at(session, 120.0, _exposure_ms(session, 120.0), REASON)
+    assert not after["flags"]["background_changed"]
+
+
 def test_retake_darks_needs_budget() -> None:
     session = MeasurementSession(replace(clean_scenario(), max_positions=1))
     assert "error" not in retake_darks(session, REASON)
@@ -292,6 +305,27 @@ def test_large_beam_reports_beam_in_corners_not_background_changed() -> None:
     assert result["flags"]["beam_in_corners"]
     assert not result["flags"]["background_changed"]
     assert any("corner patches" in text for text in result["warnings"])
+
+
+def test_room_light_is_not_masked_by_a_large_beam() -> None:
+    """d ~ 1.1 mm: the 3 x d box reaches the patches, but the beam light there
+    is ~1e-10 of the peak, so the room light must still be reported."""
+    session = MeasurementSession(clean_scenario())
+    session.set_faults(extra_background_counts=3.0)
+    result = measure_at(session, 250.0, _exposure_ms(session, 250.0), REASON)
+    assert result["flags"]["background_changed"]
+    assert not result["flags"]["beam_in_corners"]
+
+
+def test_corner_light_of_a_flat_beam_equals_its_peak() -> None:
+    """A beam much wider than the sensor puts its peak level into the corners."""
+    sigma_m = 1.0
+    peak = 10.0
+    roi_sum = peak * 2 * np.pi * sigma_m**2 / PIXEL_M**2
+    width = replace(_width(0.0, 1.0), d_x_m=4 * sigma_m, d_y_m=4 * sigma_m)
+    width = replace(width, roi_sum_counts=roi_sum)
+    light = tools._corner_beam_light_counts(width, 512, 512, PIXEL_M)
+    assert light == pytest.approx(peak, rel=1e-4)
 
 
 @pytest.mark.parametrize(
