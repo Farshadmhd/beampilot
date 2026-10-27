@@ -116,3 +116,22 @@ centroid and σ = d/4 that falls outside the sensor (erf), and only a loss above
 suggests "reject"; `roi_clipped` remains as a warning. The widths of a clipped beam
 are themselves biased low (σ ~3.6 % low when cut at ±2.6σ), so the estimate
 understates the loss by up to ~25 % near the 1 % limit.
+
+## 2026-10-27: Known limitations (open review risks)
+
+1. **Clipping loss is underestimated.** `clipping_loss` uses σ = d/4 from the measured
+   widths, but a clipped beam's widths are themselves too small. In noise-free
+   tests the estimate is 0.80 × the true loss at 1 % and 0.70 × at 2 %, so the
+   reject only starts at a true loss of about 1.4 %, where d is already ~3 % low.
+   Possible fix: invert the truncated-Gaussian variance relation, or lower the
+   limit on the estimate to ~0.75 %.
+2. **`beam_too_large` has no hard trade-off any more.** Since `roi_clipped` is only
+   a warning, nothing in that scenario produces a reject: at the far stage end
+   (4.5 zR, d ≈ 1.4 mm) the estimated loss is 0.01 %. If the scenario should force
+   a decision, the beam must grow: a loss above 1 % needs d above ~2 mm.
+3. **Real corner light can hide a room-light change.** When beam light really
+   reaches the corner patches (`beam_in_corners`), the frame is not used for
+   `background_changed`, so a simultaneous background change goes unreported
+   (e.g. waist_outside_range at 180 mm plus 3 counts). Subtracting the modelled
+   corner light and testing the rest would catch it, but the model runs ~30 % low
+   for clipped beams, so it needs a looser limit; left as is for now.
