@@ -122,4 +122,50 @@ agent go to `runs/evaluation/` (not committed); a summary table goes to
 
 ## Deviations
 
-None yet.
+All of these are dated 27 Oct 2026 and committed **before any evaluation run**.
+
+1. **C1 is no longer held out.** The development scenario `ghost_everywhere` is the
+   same fault type, and after seeing the agent fail on it (it never looked at a frame)
+   the system prompt was changed (deviation 6). C1 is still run with its seed and
+   definition, but it is reported separately as **"seen"** and left out of the
+   held-out totals. C2 is the same fault type as the development scenario
+   `ghost_in_range`; that was known when the plan was written, and the prompt was
+   not changed after that run, so C2 stays held out as planned.
+2. **C1 wording fix.** At 8 % power the ghost stays outside the iterated 3·d
+   integration area near the waist, so the waist widths come out clean and only the
+   far field is inflated. The sentence "no position gives true widths" was wrong for
+   C1. The expected verdict (`measurement_failed`, ghost named) is unchanged,
+   because no ISO-compliant far field can be measured on either side.
+3. **New held-out case C5: an iris that clips the beam in a z range.**
+
+   | Case | Base | Seed | Fault (exact definition) | Expected verdict |
+   |---|---|---|---|---|
+   | C5 | clean | 304 | Circular aperture in front of the sensor for 30 ≤ z ≤ 70 mm: `Aperture(radius_m=0.35e-3, z_min_m=0.030, z_max_m=0.070)`, centred on the beam axis; the profile is truncated, diffraction ignored | iso_compliant, M² within 3 % (clipped positions rejected or avoided) |
+
+   Widths inside the range come out too small (−21 % at 30 mm, −11 % at 50 mm,
+   −1.4 % at 70 mm). This was checked once on the simulator, without the agent, to
+   make sure that **no current flag fires**. Far points are available outside the
+   iris range below the waist (below 30 mm) and above it (170–250 mm). Fault-noticed
+   keywords: "aperture", "iris", "truncat", "vignett", "cut off", "obstruct",
+   "smaller than expected".
+4. **Ablation: group C runs twice for the agent.** `agent` is the normal agent with
+   `view_frame` (4 views). `agent-noview` has the tool removed from its tool list,
+   the "Looking at frames" section removed from its system prompt, and a view
+   budget of 0. Same seeds and cases. The scripted and naive contenders run group C
+   once (they never look at frames).
+5. **Scoring of C3 and C5.** Their expected column includes "M² within 3 %". A run
+   counts as correct only if the verdict matches **and** |M² error| ≤ 3 % on both
+   axes.
+6. **Code changes after pre-registration, before any run.**
+   - The system prompt now names general triggers for looking at a frame: a flag at
+     every position, an azimuth that stays tilted, widths that do not follow a
+     smooth hyperbola. It does not name ghosts, apertures or any group C fault.
+   - Only the 2 most recent images stay in the resent history; older ones become a
+     short text stub.
+   - Hot pixels, pointing drift and the aperture were added to the simulator.
+7. **Budget and order.** Agent runs: 16 (A) + 5 (B) + 2 × 5 (C) = 31. The original
+   "31" was a miscount of 25. The stop rule stays at **$4** in total for this
+   evaluation's agent runs. Order: A1–A16, B1–B5, then C1–C5, each case with and
+   without `view_frame`. Up to 3 runs go in parallel. The budget is checked before
+   each run starts, so at most the runs already going (≤ 2 × $0.50 per-run cap)
+   can pass $4.
