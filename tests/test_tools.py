@@ -335,10 +335,39 @@ def test_beam_too_large_far_out_is_roi_clipped() -> None:
     session = MeasurementSession(beam_too_large_scenario())
     beam = session.scenario.beam
     z_r = rayleigh_length(beam.d0x_m, beam.m2x, beam.wavelength_m)
-    z_mm = (beam.z0x_m + 3.2 * z_r) * 1e3
+    z_mm = (beam.z0x_m + 3.2 * z_r) * 1e3  # d ~ 1.0 mm: sensor edge at 5.6 sigma
     result = measure_at(session, z_mm, _exposure_ms(session, z_mm), REASON)
     assert result["flags"]["roi_clipped"]
+    assert not result["flags"]["clipping_loss"]
+    assert result["details"]["clipping_loss_percent"] < 0.01
+    # Cut at >= 5 sigma the widths are fine: a warning, not a reject.
+    assert result["suggested_verdict"] == "accept"
+    assert any("cut by the sensor edge" in text for text in result["warnings"])
+
+
+def test_clipping_loss_above_one_percent_is_rejected() -> None:
+    session = MeasurementSession(waist_outside_range_scenario())
+    # 280 mm from the waist: d ~ 2.3 mm on a 2.8 mm sensor.
+    exposure_ms = min(_exposure_ms(session, 230.0), 200.0)
+    result = measure_at(session, 230.0, exposure_ms, REASON)
+    assert result["flags"]["clipping_loss"]
+    assert result["details"]["clipping_loss_percent"] > 1.0
     assert result["suggested_verdict"] == "reject"
+
+
+@pytest.mark.parametrize(
+    ("x_c", "sigma_x", "sigma_y", "expected"),
+    [
+        (0.0, 0.5, 1e-6, 1 - 0.954499736),  # edges at +-2 sigma in x only
+        (0.0, 1e-6, 1e-6, 0.0),  # tiny beam: nothing lost
+        (1.0, 1e-6, 1e-6, 0.5),  # centred on the right edge: half lost
+        (0.0, 1e-6, 1.0 / 3.0, 1 - 0.997300204),  # edges at +-3 sigma in y
+    ],
+)
+def test_clipping_loss_known_answers(x_c, sigma_x, sigma_y, expected) -> None:
+    # Sensor 2 x 2 (any length unit): edges at +-1.
+    loss = tools._clipping_loss(x_c, 0.0, sigma_x, sigma_y, 2.0, 2.0)
+    assert loss == pytest.approx(expected, abs=1e-8)
 
 
 # evaluate and finish

@@ -105,3 +105,14 @@ beam and takes a fresh 50-frame dark set with the current background, so the cha
 becomes part of the dark. It costs one position from the budget, like a measurement,
 so retaking darks is a real trade-off and cannot be used for free after every frame.
 Design section 4 now lists 6 core tools.
+
+## 2026-10-27: Reject on estimated clipping loss, not on a cut integration area
+
+`measure_at` used to suggest "reject" whenever the 3 · d integration area hit the
+sensor edge. That cuts the beam at >= 6σ on one side, which biases d by far less than
+0.1 %, so it was much stricter than the ISO 11146-1 rule (power outside the sensor
+below 1 %). Now `clipping_loss` estimates the power of a Gaussian with the measured
+centroid and σ = d/4 that falls outside the sensor (erf), and only a loss above 1 %
+suggests "reject"; `roi_clipped` remains as a warning. The widths of a clipped beam
+are themselves biased low (σ ~3.6 % low when cut at ±2.6σ), so the estimate
+understates the loss by up to ~25 % near the 1 % limit.

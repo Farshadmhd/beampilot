@@ -16,6 +16,7 @@ from functools import wraps
 from typing import Any
 
 import numpy as np
+from scipy.special import erf
 
 from beampilot.caustic import CausticFit, coverage, fit_caustic, general_astigmatism
 from beampilot.session import N_DARK_FRAMES, Measurement, MeasurementSession
@@ -32,6 +33,7 @@ LOW_SIGNAL_COUNTS = 500.0  # background-subtracted peak in counts
 MIN_PIXELS_ACROSS = 20  # ISO 11146-1: at least 20 px across the beam width
 BACKGROUND_SIGMA_LIMIT = 4.0  # |residual offset| / std error (ISO/TR 11146-3)
 ALIGNMENT_LIMIT_DEG = 10.0  # principal axes vs lab x/y
+MAX_CLIPPING_LOSS = 0.01  # ISO 11146-1: power outside the sensor below 1 %
 CIRCULAR_THRESHOLD = 0.87  # ellipticity above this: circular (unverified, ISO)
 MIN_FIT_POSITIONS = 4
 
@@ -47,11 +49,14 @@ REJECT_FLAGS = {
     "saturated": "saturated: pixels at full scale, use a shorter exposure",
     "low_signal": f"low signal: peak below {LOW_SIGNAL_COUNTS:.0f} counts, "
     "use a longer exposure",
-    "roi_clipped": "beam area cut by the sensor edge: widths biased low",
+    "clipping_loss": f"estimated clipping loss above {MAX_CLIPPING_LOSS:.0%} of the "
+    "power (ISO 11146-1): beam too large or too far off-centre for the sensor",
     "too_few_pixels": f"fewer than {MIN_PIXELS_ACROSS} pixels across the beam",
     "not_converged": "width iteration failed or did not converge",
 }
 WARNING_FLAGS = {
+    "roi_clipped": "the 3 x d integration area is cut by the sensor edge "
+    "(estimated clipping loss below 1 %)",
     "beam_in_corners": "the beam area reaches the corner patches used for the "
     "background offset: beam light there inflates the offset and biases widths "
     "low; centre the beam or measure where it is smaller",
@@ -159,9 +164,13 @@ def measure_at(
 
     - ``saturated``: any raw pixel at full scale.
     - ``low_signal``: mean background-subtracted peak below 500 counts.
-    - ``roi_clipped``: the 3 x d integration area hit the sensor edge.
+    - ``clipping_loss``: more than 1 % of the power of a Gaussian with the
+      measured centroid and sigmas (d / 4) falls outside the sensor (ISO
+      11146-1). The widths of a clipped beam are themselves biased low, so
+      this estimate understates the loss somewhat.
     - ``too_few_pixels``: the smaller mean width spans fewer than 20 pixels.
     - ``not_converged``: a frame's width iteration failed or did not settle.
+    - ``roi_clipped``: the 3 x d integration area hit the sensor edge.
     - ``beam_in_corners``: in some frame the converged 3 x d rectangle
       overlaps a corner patch used for the fine offset, so beam light may
       inflate the offset.
@@ -172,7 +181,7 @@ def measure_at(
       the median azimuth deviates from the x/y axes by more than 10 degrees
       (azimuth taken modulo 90 degrees).
 
-    The first five make the suggested verdict ``"reject"``; the last three are
+    The first five make the suggested verdict ``"reject"``; the last four are
     warnings. The measurement is stored with status ``"pending"``.
 
     Parameters
@@ -230,15 +239,24 @@ def measure_at(
         )
         in_corners.append(_roi_in_corners(width.roi, camera.nx, camera.ny))
     stats = width_statistics(widths)
+    clipping_loss = _clipping_loss(
+        float(np.mean([w.x_c_m for w in widths])),
+        float(np.mean([w.y_c_m for w in widths])),
+        stats.d_x_mean_m / 4.0,
+        stats.d_y_mean_m / 4.0,
+        camera.nx * pixel_m,
+        camera.ny * pixel_m,
+    )
     pixels_across = min(stats.d_x_mean_m, stats.d_y_mean_m) / pixel_m
     misalignment_deg = _median_misalignment_deg(widths)
 
     flags = {
         "saturated": max(saturation) > 0,
         "low_signal": float(np.mean(peaks)) < LOW_SIGNAL_COUNTS,
-        "roi_clipped": any(w.roi_clipped for w in widths),
+        "clipping_loss": bool(clipping_loss > MAX_CLIPPING_LOSS),
         "too_few_pixels": bool(pixels_across < MIN_PIXELS_ACROSS),
         "not_converged": not all(w.converged for w in widths),
+        "roi_clipped": any(w.roi_clipped for w in widths),
         "beam_in_corners": any(in_corners),
         # Frames with beam light in the corners say nothing about the background.
         "background_changed": any(
@@ -255,6 +273,7 @@ def measure_at(
         "saturated_pixel_fraction": _num(max(saturation), 6),
         "residual_offset_counts": _num(np.mean(offsets), 3),
         "max_offset_sigma": _num(max(offset_ratios), 1),
+        "clipping_loss_percent": _num(clipping_loss * 100, 3),
         "pixels_across": _num(pixels_across, 1),
         "centroid_um": [
             _num(np.mean([w.x_c_m for w in widths]) * 1e6, 1),
@@ -567,6 +586,32 @@ def _table_row(m: Measurement) -> dict[str, Any]:
         "suggested": m.suggested_verdict,
         "flags": [name for name, value in m.flags.items() if value],
     }
+
+
+def _clipping_loss(
+    x_c_m: float,
+    y_c_m: float,
+    sigma_x_m: float,
+    sigma_y_m: float,
+    width_m: float,
+    height_m: float,
+) -> float:
+    """Fraction of a Gaussian beam's power that falls outside the sensor.
+
+    The beam has centroid (x_c, y_c) relative to the sensor centre and second-
+    moment sigmas along x and y; the sensor spans +-width/2 and +-height/2.
+    Returns NaN if a sigma is not finite and positive.
+    """
+    if not (sigma_x_m > 0 and sigma_y_m > 0):
+        return float("nan")
+
+    def inside(centre: float, sigma: float, half: float) -> float:
+        scale = np.sqrt(2.0) * sigma
+        return 0.5 * (erf((half - centre) / scale) + erf((half + centre) / scale))
+
+    p_x = inside(x_c_m, sigma_x_m, width_m / 2.0)
+    p_y = inside(y_c_m, sigma_y_m, height_m / 2.0)
+    return float(1.0 - p_x * p_y)
 
 
 def _roi_in_corners(roi: Roi, nx: int, ny: int) -> bool:
