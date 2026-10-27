@@ -219,3 +219,22 @@ axis is `outside` and an accepted position lies within 5 % of the stage length
 (`STAGE_END_FRACTION`) from that stage end; the scripted operator approaches the end
 to that margin before concluding. waist_outside_range stays waist_not_accessible
 10/10 (8 positions).
+
+## 2026-10-27: view_frame, the 7th tool, and the ghost reflection
+
+Smoke test (`scripts/smoke_test_image.py`, muse-spark-1.2): a simulated frame as a
+PNG data URL was described correctly both in a user message and inside a
+`function_call_output` (content parts `input_text` + `input_image`): two spots,
+positions and relative brightness right. The docs disagree on images outside user
+messages; the test shows they reach the model, so `view_frame` returns its image in
+the tool output. The image is a 512 × 512 PNG on a square-root brightness scale (faint
+structure next to a bright peak stays visible), handed to the agent loop by
+`image_id` and never written to logs or run files. Views have their own budget
+(4 per run) and cost no positions, so looking is cheap but not free.
+
+The simulator's optional `Ghost` adds a second Gaussian spot (relative power, offset,
+size factor, optional z window, offset changing linearly with z). Known answer: for
+equal widths the mixture's second moment is σ² + w₁w₂Δ² and the centroid moves by
+w₂Δ; the test checks this to 0.1-0.2 % (integer rounding of faint tails). The prompt
+describes `view_frame` generically ("when numbers look odd or flags are ambiguous")
+and does not name ghosts, because ghosts are a held-out fault in evaluation group C.
