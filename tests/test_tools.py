@@ -529,6 +529,22 @@ def test_every_call_is_logged_with_reason_and_result() -> None:
     assert session.log[1]["arguments"]["z_mm"] == 999.0
 
 
+@pytest.mark.allow_internal_error
+def test_unexpected_exception_becomes_internal_error(monkeypatch) -> None:
+    session = MeasurementSession(clean_scenario())
+
+    def broken_camera(z_m, exposure_ms):
+        raise RuntimeError("camera disconnected")
+
+    monkeypatch.setattr(session, "take_frames", broken_camera)
+    result = measure_at(session, 120.0, 1.5, "will fail")
+    assert result == {"internal_error": "RuntimeError: camera disconnected"}
+    assert "Traceback" in session.log[-1]["traceback"]
+    assert session.log[-1]["reason"] == "will fail"
+    # The session keeps working.
+    assert "error" not in get_setup(session, "still alive?")
+
+
 def test_tools_never_touch_the_hidden_truth() -> None:
     source = inspect.getsource(tools)
     assert "reveal_truth" not in source

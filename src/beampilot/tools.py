@@ -1,8 +1,10 @@
 """The six agent tools (design section 4), as plain functions on a session.
 
 Every tool takes a required `reason` (``finish`` uses its `explanation`),
-returns a JSON-serialisable dict, and never raises on bad input: it returns
-``{"error": "..."}`` with a helpful message instead. Units at this boundary:
+returns a JSON-serialisable dict, and never raises: bad input gives
+``{"error": "..."}`` with a helpful message, and any unexpected exception
+gives ``{"internal_error": "..."}`` (its traceback goes to the log), so a
+demo run can never crash on a tool call. Units at this boundary:
 z in mm, diameters in um, wavelength in nm, exposure in ms. Inside the
 session everything is SI. Every call, including failed ones, is appended to
 ``session.log`` with its arguments, reason and result.
@@ -11,6 +13,7 @@ session everything is SI. Every call, including failed ones, is appended to
 from __future__ import annotations
 
 import inspect
+import traceback
 from collections.abc import Callable
 from functools import wraps
 from typing import Any
@@ -80,6 +83,7 @@ def _tool(reason_arg: str = "reason") -> Callable:
         @wraps(func)
         def wrapper(session: MeasurementSession, *args: Any, **kwargs: Any) -> dict:
             arguments: dict[str, Any] = {}
+            trace = None
             try:
                 try:
                     bound = signature.bind(session, *args, **kwargs)
@@ -96,14 +100,18 @@ def _tool(reason_arg: str = "reason") -> Callable:
                 result = func(session, *args, **kwargs)
             except ToolInputError as exc:
                 result = {"error": str(exc)}
-            session.log.append(
-                {
-                    "tool": func.__name__,
-                    "arguments": arguments,
-                    "reason": arguments.get(reason_arg),
-                    "result": result,
-                }
-            )
+            except Exception as exc:  # noqa: BLE001 - the demo must never crash
+                result = {"internal_error": f"{type(exc).__name__}: {exc}"}
+                trace = traceback.format_exc()
+            entry = {
+                "tool": func.__name__,
+                "arguments": arguments,
+                "reason": arguments.get(reason_arg),
+                "result": result,
+            }
+            if trace is not None:
+                entry["traceback"] = trace
+            session.log.append(entry)
             return result
 
         return wrapper
