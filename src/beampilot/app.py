@@ -18,7 +18,6 @@ the page is reloaded; the process-wide caps are the real guard.
 
 # No "from __future__ import annotations" here: Gradio inspects the handlers'
 # annotations to inject gr.Request, which needs real classes, not strings.
-import json
 import queue
 import threading
 import time
@@ -87,9 +86,11 @@ class GlobalBudget:
             self.runs += 1
             return None
 
-    def release(self) -> None:
+    def release(self, started: bool = True) -> None:
         with self._lock:
             self.active = max(0, self.active - 1)
+            if not started:
+                self.runs = max(0, self.runs - 1)
 
     def add_tokens(self, tokens: int) -> None:
         with self._lock:
@@ -204,7 +205,9 @@ def replay_frame(run: SavedRun, state: RunState) -> np.ndarray | None:
             )
             camera = _camera()
         if not (
-            0 < camera.nx <= MAX_REPLAY_PIXELS and 0 < camera.ny <= MAX_REPLAY_PIXELS
+            0 < camera.nx <= MAX_REPLAY_PIXELS
+            and 0 < camera.ny <= MAX_REPLAY_PIXELS
+            and 1 <= camera.bit_depth <= 16
         ):
             return None
         exposure = float(np.clip(point.exposure_ms, 1e-3, 1e3))
@@ -212,7 +215,7 @@ def replay_frame(run: SavedRun, state: RunState) -> np.ndarray | None:
             beam, camera, point.z_mm * 1e-3, exposure, np.random.default_rng(0)
         )
         return frame_image(frame, camera.full_scale_counts)
-    except (TypeError, ValueError, KeyError):
+    except Exception:  # noqa: BLE001 - an uploaded file may contain anything
         return None
 
 
@@ -351,7 +354,7 @@ def live_run(scenario_name: str, seed: float, note: str, request: Any = None):
         return
     try:
         seed = int(seed or 0)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         seed = -1
     if not 0 <= seed <= MAX_SEED:
         yield _message(f"The seed must be between 0 and {MAX_SEED}.")
@@ -387,7 +390,7 @@ def live_run(scenario_name: str, seed: float, note: str, request: Any = None):
         )
         session = MeasurementSession(scenario)
     except Exception as exc:  # noqa: BLE001 - e.g. no API key: free the slots
-        _release(browser)
+        _release(browser, started=False)
         text = (
             "Live runs need MODEL_API_KEY in the environment or .env; use Replay."
             if isinstance(exc, RuntimeError)
@@ -416,12 +419,12 @@ def live_run(scenario_name: str, seed: float, note: str, request: Any = None):
     deadline = time.monotonic() + RUN_TIMEOUT_S
     try:
         while True:
+            if time.monotonic() > deadline and not cancel.is_set():
+                cancel.set()
+                state.log.append("⏱️ Time limit reached; stopping the run.")
             try:
                 kind, payload = events.get(timeout=EVENT_POLL_S)
             except queue.Empty:
-                if time.monotonic() > deadline and not cancel.is_set():
-                    cancel.set()
-                    state.log.append("⏱️ Time limit reached; stopping the run.")
                 if not worker.is_alive() and events.empty():
                     state.log.append("❌ The run stopped unexpectedly.")
                     yield _live_update(state, session, stage)
@@ -461,12 +464,14 @@ def _work(browser, session, client, config, note, scenario_name, seed, events):
         _GLOBAL.add_tokens(tokens)
         events.put(("reply", step))
 
-    def should_stop() -> bool:
-        return (
-            browser.cancel.is_set()
-            or browser.tokens >= SESSION_TOKEN_BUDGET
-            or _GLOBAL.tokens_left() <= 0
-        )
+    def should_stop() -> str | None:
+        if browser.cancel.is_set():
+            return "cancelled by the controller (tab closed or time limit)"
+        if browser.tokens >= SESSION_TOKEN_BUDGET:
+            return "token budget of this browser session reached"
+        if _GLOBAL.tokens_left() <= 0:
+            return "token budget of the demo reached"
+        return None
 
     try:
         run = run_agent(
@@ -498,10 +503,13 @@ def _work(browser, session, client, config, note, scenario_name, seed, events):
         events.put(("end", (stop_reason, saved_as)))
 
 
-def _release(browser: BrowserSession) -> None:
+def _release(browser: BrowserSession, started: bool = True) -> None:
+    """Free the tab and the global slot; a run that never started is uncounted."""
     with browser.lock:
         browser.active = False
-    _GLOBAL.release()
+        if not started:
+            browser.runs = max(0, browser.runs - 1)
+    _GLOBAL.release(started)
 
 
 def _live_update(state: RunState, session: MeasurementSession, stage):
@@ -564,7 +572,7 @@ def replay(saved: str | None, upload: Any, seconds_per_step: float):
         return
     try:
         yield from _replay(load_run(path), seconds_per_step)
-    except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError) as exc:
+    except Exception as exc:  # noqa: BLE001 - an uploaded file may contain anything
         yield (
             f"Cannot replay this file ({type(exc).__name__}).",
             None,

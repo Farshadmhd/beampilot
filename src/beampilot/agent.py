@@ -57,6 +57,7 @@ OPERATOR_NOTE_PREFIX = (
     "so respect it yourself): "
 )
 RETRIES = 2
+CALL_TIMEOUT_S = 120.0  # per model call; slow reasoning replies take ~20 s
 RETRY_DELAY_S = 2.0
 TRANSIENT_ERRORS = {
     "APIConnectionError",
@@ -250,7 +251,10 @@ def make_client() -> Any:
     if not api_key:
         raise RuntimeError("MODEL_API_KEY is not set (see .env.example)")
     # Retries are handled in run_agent (transient errors only), not by the SDK.
-    return OpenAI(api_key=api_key, base_url=BASE_URL, max_retries=0)
+    # A timeout per call keeps one hung request from blocking a run for long.
+    return OpenAI(
+        api_key=api_key, base_url=BASE_URL, max_retries=0, timeout=CALL_TIMEOUT_S
+    )
 
 
 def call_cost_usd(usage: Usage, model: str) -> float:
@@ -272,7 +276,7 @@ def run_agent(
     on_model_reply: Callable[[dict[str, Any]], None] | None = None,
     on_tool_call: Callable[[dict[str, Any]], None] | None = None,
     operator_note: str | None = None,
-    should_stop: Callable[[], bool] | None = None,
+    should_stop: Callable[[], bool | str | None] | None = None,
 ) -> AgentRun:
     """Run the agent until ``finish`` succeeds or a hard limit is hit.
 
@@ -304,7 +308,8 @@ def run_agent(
         enforce it.
     should_stop : callable, optional
         Checked before every model call (e.g. a cancel flag set when the demo
-        user closes the tab); True stops the run like a hard limit.
+        user closes the tab). A truthy result stops the run like a hard limit;
+        a string result becomes the stop reason.
 
     Returns
     -------
@@ -324,8 +329,11 @@ def run_agent(
     history: list[dict[str, Any]] = [{"role": "user", "content": task}]
 
     for call_number in range(1, config.max_model_calls + 1):
-        if should_stop is not None and should_stop():
-            run.stop_reason = "cancelled by the controller"
+        stop = should_stop() if should_stop is not None else None
+        if stop:
+            run.stop_reason = (
+                stop if isinstance(stop, str) else "cancelled by the controller"
+            )
             break
         if run.usage.total_tokens >= config.max_total_tokens:
             run.stop_reason = f"token budget reached ({run.usage.total_tokens})"

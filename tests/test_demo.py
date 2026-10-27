@@ -191,7 +191,9 @@ def test_closing_the_tab_cancels_and_still_accounts(monkeypatch, tmp_path) -> No
     _wait_until_idle(browser)
     assert len(client.requests) < 20  # stopped early, not run to the end
     assert browser.tokens > 0  # counted in the worker, per reply
-    assert browser.session.report["stopped_by_limit"] == "cancelled by the controller"
+    assert browser.session.report["stopped_by_limit"].startswith(
+        "cancelled by the controller"
+    )
     assert len(list(tmp_path.glob("*.json"))) == 1
     assert demo_app._GLOBAL.active == 0
 
@@ -280,6 +282,36 @@ def test_bad_uploads_give_a_message_not_a_crash(saved_run, tmp_path) -> None:
     last = list(demo_app.replay(None, str(huge_path), 0.0))[-1]
     assert last[2] is None  # no frame rendered
     assert last[5]["verdict"] == "estimate_not_compliant"
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        lambda d: d.__setitem__("report", "x"),
+        lambda d: d["scenario_params"]["camera"].__setitem__("bit_depth", 4_000_000),
+    ],
+    ids=["report-not-a-dict", "absurd-bit-depth"],
+)
+def test_odd_uploads_never_raise(saved_run, tmp_path, change) -> None:
+    data = json.loads(saved_run.read_text(encoding="utf-8"))
+    change(data)
+    path = tmp_path / "odd.json"
+    path.write_text(json.dumps(data), "utf-8")
+    updates = list(demo_app.replay(None, str(path), 0.0))  # must not raise
+    assert updates
+
+
+def test_failed_starts_do_not_use_up_the_run_limits(monkeypatch) -> None:
+    def no_key():
+        raise RuntimeError("MODEL_API_KEY is not set")
+
+    monkeypatch.setattr(demo_app, "_client", no_key)
+    request = SimpleNamespace(session_hash="test-nokey")
+    demo_app._BROWSERS.pop("test-nokey", None)
+    for _ in range(5):
+        assert "MODEL_API_KEY" in next(demo_app.live_run("clean", 0, "", request))[2]
+    assert demo_app._browser(request).runs == 0
+    assert demo_app._GLOBAL.runs == 0 and demo_app._GLOBAL.active == 0
 
 
 def test_closing_the_tab_forgets_the_browser_state() -> None:
