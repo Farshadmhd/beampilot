@@ -272,6 +272,7 @@ def run_agent(
     on_model_reply: Callable[[dict[str, Any]], None] | None = None,
     on_tool_call: Callable[[dict[str, Any]], None] | None = None,
     operator_note: str | None = None,
+    should_stop: Callable[[], bool] | None = None,
 ) -> AgentRun:
     """Run the agent until ``finish`` succeeds or a hard limit is hit.
 
@@ -301,6 +302,9 @@ def run_agent(
         Plain-language note from the person at the bench (e.g. a blocked z
         range). Added to the first message and logged; the tools do not
         enforce it.
+    should_stop : callable, optional
+        Checked before every model call (e.g. a cancel flag set when the demo
+        user closes the tab); True stops the run like a hard limit.
 
     Returns
     -------
@@ -320,6 +324,9 @@ def run_agent(
     history: list[dict[str, Any]] = [{"role": "user", "content": task}]
 
     for call_number in range(1, config.max_model_calls + 1):
+        if should_stop is not None and should_stop():
+            run.stop_reason = "cancelled by the controller"
+            break
         if run.usage.total_tokens >= config.max_total_tokens:
             run.stop_reason = f"token budget reached ({run.usage.total_tokens})"
             break
@@ -340,7 +347,7 @@ def run_agent(
                 include=["reasoning.encrypted_content"],
             )
         except Exception as exc:  # noqa: BLE001 - log and stop cleanly
-            run.stop_reason = f"API error: {type(exc).__name__}: {exc}"
+            run.stop_reason = api_error_text(exc)
             break
         latency = time.perf_counter() - start
         usage = _usage(response)
@@ -398,6 +405,18 @@ def save_run(run: AgentRun, path: Path, extra: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     document = {**extra, **run.to_dict()}
     path.write_text(json.dumps(document, indent=2, ensure_ascii=False), "utf-8")
+
+
+def api_error_text(exc: BaseException) -> str:
+    """Safe description of an API error: type and HTTP status only.
+
+    The message text is left out on purpose: it comes from the server and could
+    contain (parts of) the API key, and it ends up in the UI, the report and
+    the saved run file.
+    """
+    status = getattr(exc, "status_code", None)
+    suffix = f" (HTTP {status})" if isinstance(status, int) else ""
+    return f"API error: {type(exc).__name__}{suffix}"
 
 
 def _create_with_retry(client: Any, **request: Any) -> Any:

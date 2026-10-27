@@ -303,7 +303,8 @@ def test_api_error_stops_cleanly() -> None:
 
     client = FakeClient([fail])
     run = run_agent(_session(), client)
-    assert run.stop_reason == "API error: ConnectionError: network down"
+    # Type only: the message text could carry server text (e.g. a masked key).
+    assert run.stop_reason == "API error: ConnectionError"
     assert run.steps == []
     assert run.report["verdict"] == "measurement_failed"
     assert run.report["stopped_by_limit"] == run.stop_reason
@@ -380,6 +381,32 @@ def test_fault_injected_during_a_run_hits_the_next_measurement() -> None:
     assert not first["flags"]["background_changed"]
     assert second["flags"]["background_changed"]
     assert session.fault_events[0]["source"] == "operator"
+
+
+def test_api_error_text_has_type_and_status_but_no_message() -> None:
+    class AuthenticationError(Exception):
+        status_code = 401
+
+    def fail():
+        raise AuthenticationError("Incorrect API key provided: sk-SECRET123456")
+
+    run = run_agent(_session(), FakeClient([fail]))
+    assert run.stop_reason == "API error: AuthenticationError (HTTP 401)"
+    assert "SECRET" not in json.dumps(run.to_dict())
+
+
+def test_should_stop_cancels_before_the_next_model_call() -> None:
+    calls = {"n": 0}
+
+    def stop_after_two() -> bool:
+        calls["n"] += 1
+        return calls["n"] > 2
+
+    client = FakeClient([_response(_call("get_setup")) for _ in range(5)])
+    run = run_agent(_session(), client, should_stop=stop_after_two)
+    assert len(client.requests) == 2
+    assert run.stop_reason == "cancelled by the controller"
+    assert run.report["stopped_by_limit"] == "cancelled by the controller"
 
 
 def test_requests_never_contain_the_hidden_truth() -> None:
