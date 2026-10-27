@@ -1,4 +1,4 @@
-"""Muse Spark agent loop over the six measurement tools (design sections 4, 10).
+"""Muse Spark agent loop over the seven measurement tools (design sections 4, 10).
 
 The model sees only the system prompt, one task message and the JSON results
 of the tools; all physics numbers come from :mod:`beampilot.tools`. Verified
@@ -27,7 +27,7 @@ import json
 import os
 import time
 from collections.abc import Callable
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from importlib import resources
 from pathlib import Path
 from typing import Any
@@ -154,6 +154,12 @@ TOOL_DEFINITIONS = [
     }
     for schema in TOOL_SCHEMAS
 ]
+# Images from view_frame stay in the resent history only for the most recent
+# views; older ones become a text stub, so a run does not resend every image
+# on every call.
+KEEP_IMAGES = 2
+IMAGE_STUB = "(image shown earlier; no longer attached)"
+FRAMES_SECTION = "# Looking at frames"
 TOOL_FUNCTIONS: dict[str, Callable[..., dict[str, Any]]] = {
     "get_setup": tools.get_setup,
     "measure_at": tools.measure_at,
@@ -184,6 +190,10 @@ class AgentConfig:
         Cost budget per run in USD, from :data:`PRICES_PER_MTOK`. Default 0.50.
     max_output_tokens : int
         Output cap per model call (reasoning + visible). Default 8000.
+    view_frame : bool
+        Offer the ``view_frame`` tool. False (for the ablation) removes the
+        tool, the "Looking at frames" prompt section and the view budget.
+        Default True.
     """
 
     model: str = DEFAULT_MODEL
@@ -192,6 +202,7 @@ class AgentConfig:
     max_total_tokens: int = 1_500_000
     max_cost_usd: float = 0.50
     max_output_tokens: int = 8000
+    view_frame: bool = True
 
 
 @dataclass
@@ -239,11 +250,19 @@ class AgentRun:
         }
 
 
-def system_prompt() -> str:
-    """The system prompt from ``beampilot/prompts/system.md``."""
-    return (resources.files("beampilot") / "prompts" / "system.md").read_text(
+def system_prompt(view_frame: bool = True) -> str:
+    """The system prompt from ``beampilot/prompts/system.md``.
+
+    With ``view_frame=False`` the "Looking at frames" section is left out.
+    """
+    text = (resources.files("beampilot") / "prompts" / "system.md").read_text(
         encoding="utf-8"
     )
+    if view_frame:
+        return text
+    start = text.index(FRAMES_SECTION)
+    end = text.index("\n# ", start + len(FRAMES_SECTION))
+    return text[:start] + text[end + 1 :]
 
 
 def make_client() -> Any:
@@ -332,7 +351,11 @@ def run_agent(
     config = config or AgentConfig()
     note = (operator_note or "").strip() or None
     run = AgentRun(config=config, operator_note=note)
-    instructions = system_prompt()
+    instructions = system_prompt(config.view_frame)
+    tool_definitions = TOOL_DEFINITIONS
+    if not config.view_frame:
+        tool_definitions = [t for t in TOOL_DEFINITIONS if t["name"] != "view_frame"]
+        session.scenario = replace(session.scenario, max_views=0)
     task = TASK if note is None else f"{TASK}\n\n{OPERATOR_NOTE_PREFIX}{note}"
     # Stateless conversation: the full history is resent on every call, with
     # the reasoning replayed from its encrypted content. Server-stored
@@ -359,7 +382,7 @@ def run_agent(
                 model=config.model,
                 instructions=instructions,  # not kept across turns: resend
                 input=list(history),
-                tools=TOOL_DEFINITIONS,
+                tools=tool_definitions,
                 reasoning={"effort": config.reasoning_effort},
                 max_output_tokens=config.max_output_tokens,
                 store=False,
@@ -389,7 +412,7 @@ def run_agent(
         for item in response.output:
             if getattr(item, "type", None) != "function_call":
                 continue
-            entry, result = _execute(session, item)
+            entry, result = _execute(session, item, config.view_frame)
             step["tool_calls"].append(entry)
             if on_tool_call is not None:
                 on_tool_call(entry)
@@ -404,6 +427,7 @@ def run_agent(
             break
         history.extend(_replay_items(response.output))
         history.extend(outputs or [{"role": "user", "content": NUDGE}])
+        _drop_old_images(history, KEEP_IMAGES)
     else:
         run.stop_reason = f"model call limit reached ({config.max_model_calls})"
     if not session.finished:
@@ -521,7 +545,31 @@ def _call_output(
     return {"type": "function_call_output", "call_id": call_id, "output": output}
 
 
-def _execute(session: MeasurementSession, item: Any) -> tuple[dict, dict]:
+def _drop_old_images(history: list[dict[str, Any]], keep: int) -> None:
+    """Replace all but the last `keep` images in `history` with a text stub.
+
+    Items are replaced, not changed in place, so earlier requests keep what
+    was actually sent.
+    """
+    with_image = [
+        index
+        for index, item in enumerate(history)
+        if item.get("type") == "function_call_output"
+        and isinstance(item.get("output"), list)
+    ]
+    for index in with_image[: max(len(with_image) - keep, 0)]:
+        item = history[index]
+        text = "".join(
+            part.get("text", "")
+            for part in item["output"]
+            if part.get("type") == "input_text"
+        )
+        history[index] = {**item, "output": f"{text}\n{IMAGE_STUB}"}
+
+
+def _execute(
+    session: MeasurementSession, item: Any, view_frame: bool = True
+) -> tuple[dict, dict]:
     """Run one function call through the tools; never raises."""
     name = item.name
     try:
@@ -533,8 +581,11 @@ def _execute(session: MeasurementSession, item: Any) -> tuple[dict, dict]:
         return {"name": name, "arguments": item.arguments, "result": result}, result
     reason = arguments.get("reason")
     function = TOOL_FUNCTIONS.get(name)
+    if name == "view_frame" and not view_frame:
+        function = None
     if function is None:
-        result = {"error": f"unknown tool {name!r}; tools: {', '.join(TOOL_FUNCTIONS)}"}
+        offered = [n for n in TOOL_FUNCTIONS if view_frame or n != "view_frame"]
+        result = {"error": f"unknown tool {name!r}; tools: {', '.join(offered)}"}
     else:
         call_arguments = dict(arguments)
         if name == "finish":

@@ -147,12 +147,13 @@ def get_setup(session: MeasurementSession, reason: str) -> dict[str, Any]:
     dict
         Wavelength in nm, stage range in mm, pixel size in um, sensor size in
         px and mm, full scale in counts, exposure range in ms, repeats per
-        position, position budget, and the smallest beam width in um that
-        still has 20 pixels across it.
+        position, position budget, the smallest beam width in um that still
+        has 20 pixels across it, and the ``view_frame`` budget left (only if
+        the run has one).
     """
     scenario, camera = session.scenario, session.camera
     pixel_um = camera.pixel_size_m * 1e6
-    return {
+    setup: dict[str, Any] = {
         "wavelength_nm": _num(session.wavelength_m * 1e9, 3),
         "stage_range_mm": [
             _num(scenario.stage_min_m * 1e3, 3),
@@ -170,8 +171,10 @@ def get_setup(session: MeasurementSession, reason: str) -> dict[str, Any]:
         "max_positions": scenario.max_positions,
         "positions_left": session.positions_left,
         "min_beam_width_um": _num(MIN_PIXELS_ACROSS * pixel_um, 1),
-        "views_left": session.views_left,
     }
+    if scenario.max_views > 0:  # no view budget: the tool is not offered
+        setup["views_left"] = session.views_left
+    return setup
 
 
 @_tool()

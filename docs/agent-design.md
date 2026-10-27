@@ -91,6 +91,8 @@ Every tool has a required `reason` string. Tool schemas are strict, and verdicts
      second moments hide (e.g. a ghost reflection).
    - Separate small budget (4 views per run), no position cost. The image goes to the model
      inside the tool output and is not stored in logs or run files.
+   - Only the 2 most recent images stay in the resent history; older ones become a text
+     stub. `AgentConfig(view_frame=False)` switches the tool off (evaluation ablation).
 
 Stretch tool (only after the core works): `change_lens(f_mm, reason)` for an inaccessible
 waist (ISO uses an artificial waist made with an aberration-free lens, and M² stays the same).
@@ -143,6 +145,8 @@ Core:
 
 Ghost reflection (with `view_frame`): `ghost_everywhere` (expected `measurement_failed`) and
 `ghost_in_range` (expected `iso_compliant` after rejecting the ghost positions).
+Held-out faults for evaluation only (not in `SCENARIOS`): iris aperture over a z range,
+hot pixels, pointing drift (see `docs/evaluation-plan.md`).
 
 Stretch: `change_lens`, general astigmatism detection demo.
 

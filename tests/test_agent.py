@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from beampilot.agent import (
+    IMAGE_STUB,
     NUDGE,
     TOOL_DEFINITIONS,
     AgentConfig,
@@ -500,3 +501,54 @@ def test_system_prompt_is_short_and_complete() -> None:
     assert len(prompt.split()) < 1500
     for word in ("ISO 11146-1", "reason", "retake_darks", "view_frame", *VERDICTS):
         assert word in prompt
+
+
+def test_only_the_two_latest_images_are_resent() -> None:
+    client = FakeClient(
+        [
+            _response(
+                _call("measure_at", z_mm=100.0, exposure_ms=1.5),
+                _call("measure_at", z_mm=120.0, exposure_ms=1.5),
+                _call("measure_at", z_mm=140.0, exposure_ms=1.5),
+            ),
+            _response(_call("view_frame", measurement_id="m1")),
+            _response(_call("view_frame", measurement_id="m2")),
+            _response(_call("view_frame", measurement_id="m3")),
+            _response(_call("finish", verdict="measurement_failed", explanation="x")),
+        ]
+    )
+    run_agent(_session(), client)
+    last = _outputs(client.requests[-1])
+    images = [o for o in last if isinstance(o["output"], list)]
+    stubs = [
+        o for o in last if isinstance(o["output"], str) and IMAGE_STUB in o["output"]
+    ]
+    assert len(images) == 2
+    assert len(stubs) == 1 and '"view1-m1"' in stubs[0]["output"]
+    # Earlier requests keep what was actually sent then.
+    assert sum(isinstance(o["output"], list) for o in _outputs(client.requests[3])) == 2
+
+
+def test_view_frame_can_be_switched_off_for_the_ablation() -> None:
+    client = FakeClient(
+        [
+            _response(
+                _call("get_setup"), _call("measure_at", z_mm=120.0, exposure_ms=1.5)
+            ),
+            _response(_call("view_frame", measurement_id="m1")),
+            _response(_call("finish", verdict="measurement_failed", explanation="x")),
+        ]
+    )
+    session = _session()
+    run = run_agent(session, client, AgentConfig(view_frame=False))
+    request = client.requests[0]
+    assert "view_frame" not in {t["name"] for t in request["tools"]}
+    assert "view_frame" not in request["instructions"]
+    assert "# How to work" in request["instructions"]
+    assert "views_left" not in run.steps[0]["tool_calls"][0]["result"]
+    refused = run.steps[1]["tool_calls"][0]["result"]
+    assert (
+        "unknown tool" in refused["error"] and "view_frame" not in refused["error"][20:]
+    )
+    assert session.views_used == 0
+    assert "Looking at frames" in system_prompt()

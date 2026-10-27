@@ -238,3 +238,27 @@ equal widths the mixture's second moment is σ² + w₁w₂Δ² and the centroid
 w₂Δ; the test checks this to 0.1-0.2 % (integer rounding of faint tails). The prompt
 describes `view_frame` generically ("when numbers look odd or flags are ambiguous")
 and does not name ghosts, because ghosts are a held-out fault in evaluation group C.
+
+## 2026-10-27: general look-triggers, image history, view_frame ablation
+
+In `ghost_everywhere` the agent never called `view_frame`: it read the constant
+`axes_not_aligned` flag as a beam property and reported a confident but wrong
+`estimate_not_compliant`. The prompt now names **general** triggers for looking at a
+frame: the same flag at every position, an azimuth that stays tilted, widths that do
+not follow one smooth hyperbola, odd centroid shifts or fit. It still names no fault
+type. Because this change was made after seeing a ghost run, evaluation case C1
+(a ghost everywhere) is reported as "seen" (evaluation plan, deviation 1).
+
+Only the 2 most recent `view_frame` images stay in the resent history
+(`KEEP_IMAGES`); older ones are replaced by a short text stub. Without this, every
+image (about 300-400 kB as a data URL) was resent on every later call of the
+stateless loop.
+
+`AgentConfig(view_frame=False)` removes the tool, the "Looking at frames" prompt
+section and the view budget, for the group C ablation. A `view_frame` call is then an
+unknown tool.
+
+The simulator gained an `Aperture` (iris over a z range, profile truncated,
+diffraction ignored; known answer: truncated-Gaussian second moment
+σ² = (w²/4)(1 − A e^−A / (1 − e^−A)), A = 2a²/w²), `HotPixels` (extra counts in
+light frames only) and a pointing drift per measurement, for evaluation group C.
