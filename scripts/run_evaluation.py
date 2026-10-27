@@ -1,4 +1,4 @@
-"""Run the pre-registered evaluation (docs/evaluation-plan.md, with deviations).
+"""Run a pre-registered evaluation (docs/evaluation-plan*.md, with deviations).
 
 Contenders: the Muse Spark agent (group C also without ``view_frame``), the
 scripted ISO operator and the naive scan. Results go to
@@ -11,7 +11,8 @@ Usage (PowerShell)::
     .venv\\Scripts\\python.exe scripts\\run_evaluation.py --run
     .venv\\Scripts\\python.exe scripts\\run_evaluation.py --summary
 
-``--run --resume`` skips runs already in ``results.jsonl``.
+``--run --resume`` skips runs already in ``results.jsonl``. ``--plan v2`` runs
+docs/evaluation-plan-v2.md (new seeds, output in ``runs/evaluation-v2/``).
 """
 
 from __future__ import annotations
@@ -82,119 +83,158 @@ def _held_out(name: str, seed: int, **kwargs: Any) -> Callable[[], Scenario]:
     return lambda: replace(clean_scenario(seed), name=name, **kwargs)
 
 
-CASES: list[Case] = [
-    Case("A1", "A", lambda: SCENARIOS["clean"](100), "iso_compliant"),
-    Case("A2", "A", lambda: SCENARIOS["partial_saturation"](100), "iso_compliant"),
-    Case("A3", "A", lambda: SCENARIOS["background_drift"](100), "iso_compliant"),
-    Case("A4", "A", lambda: SCENARIOS["beam_too_large"](100), "iso_compliant"),
-    Case(
-        "A5", "A", lambda: SCENARIOS["waist_outside_range"](100), "waist_not_accessible"
-    ),
-    Case("A6", "A", lambda: SCENARIOS["different_waists"](100), "iso_compliant"),
-    *[
-        Case(f"A{7 + i}", "A", (lambda s=1000 + i: random_scenario(s)), None)
-        for i in range(10)
-    ],
-    Case(
-        "B1",
-        "B",
-        lambda: SCENARIOS["clean"](200),
-        "iso_compliant",
-        note="The stage cannot be used between 140 and 160 mm: a mount is in the way.",
-    ),
-    Case(
-        "B2",
-        "B",
-        lambda: SCENARIOS["clean"](201),
-        "iso_compliant",
-        note="Use at most 12 stage positions in total; the stage time is booked.",
-    ),
-    Case(
-        "B3",
-        "B",
-        lambda: SCENARIOS["different_waists"](202),
-        "iso_compliant",
-        note="Only the x axis matters for this job; you may ignore y.",
-        x_only=True,
-    ),
-    Case(
-        "B4",
-        "B",
-        lambda: SCENARIOS["clean"](203),
-        "iso_compliant",
-        note="Do not use exposures above 20 ms: the camera overheats.",
-    ),
-    Case(
-        "B5",
-        "B",
-        lambda: SCENARIOS["beam_too_large"](204),
-        "iso_compliant",
-        note="Do not move the stage above 230 mm: the rail is damaged there.",
-    ),
-    Case(
-        "C1",
-        "C",
-        _held_out(
-            "C1_ghost_everywhere",
-            300,
-            ghost=Ghost(relative_power=0.08, offset_x_m=-0.35e-3, offset_y_m=0.25e-3),
-        ),
-        "measurement_failed",
-        fault="ghost",
-        seen=True,
-    ),
-    Case(
-        "C2",
-        "C",
-        _held_out(
-            "C2_ghost_in_range",
-            301,
-            ghost=Ghost(
-                relative_power=0.12,
-                offset_x_m=0.4e-3,
-                offset_y_m=0.0,
-                z_min_m=0.170,
-                z_max_m=0.250,
+def _fixed(name: str, seed: int) -> Callable[[], Scenario]:
+    return lambda: SCENARIOS[name](seed)
+
+
+def _mystery(seed: int) -> Callable[[], Scenario]:
+    return lambda: random_scenario(seed)
+
+
+def build_cases(seeds: dict[str, int]) -> list[Case]:
+    """All cases of a plan; only the seeds differ between v1 and v2."""
+    a, mystery, b, c = seeds["A"], seeds["mystery"], seeds["B"], seeds["C"]
+    return [
+        Case("A1", "A", _fixed("clean", a), "iso_compliant"),
+        Case("A2", "A", _fixed("partial_saturation", a), "iso_compliant"),
+        Case("A3", "A", _fixed("background_drift", a), "iso_compliant"),
+        Case("A4", "A", _fixed("beam_too_large", a), "iso_compliant"),
+        Case("A5", "A", _fixed("waist_outside_range", a), "waist_not_accessible"),
+        Case("A6", "A", _fixed("different_waists", a), "iso_compliant"),
+        *[Case(f"A{7 + i}", "A", _mystery(mystery + i), None) for i in range(10)],
+        Case(
+            "B1",
+            "B",
+            _fixed("clean", b),
+            "iso_compliant",
+            note=(
+                "The stage cannot be used between 140 and 160 mm: "
+                "a mount is in the way."
             ),
         ),
-        "iso_compliant",
-        fault="ghost",
-    ),
-    Case(
-        "C3",
-        "C",
-        _held_out(
-            "C3_hot_pixels",
-            302,
-            hot_pixels=HotPixels(
-                pixels=((40, 470), (40, 471), (41, 470), (41, 471)),
-                extra_counts=2500.0,
+        Case(
+            "B2",
+            "B",
+            _fixed("clean", b + 1),
+            "iso_compliant",
+            note="Use at most 12 stage positions in total; the stage time is booked.",
+        ),
+        Case(
+            "B3",
+            "B",
+            _fixed("different_waists", b + 2),
+            "iso_compliant",
+            note="Only the x axis matters for this job; you may ignore y.",
+            x_only=True,
+        ),
+        Case(
+            "B4",
+            "B",
+            _fixed("clean", b + 3),
+            "iso_compliant",
+            note="Do not use exposures above 20 ms: the camera overheats.",
+        ),
+        Case(
+            "B5",
+            "B",
+            _fixed("beam_too_large", b + 4),
+            "iso_compliant",
+            note="Do not move the stage above 230 mm: the rail is damaged there.",
+        ),
+        Case(
+            "C1",
+            "C",
+            _held_out(
+                "C1_ghost_everywhere",
+                c,
+                ghost=Ghost(
+                    relative_power=0.08, offset_x_m=-0.35e-3, offset_y_m=0.25e-3
+                ),
             ),
+            "measurement_failed",
+            fault="ghost",
+            seen=True,
         ),
-        "iso_compliant",
-        fault="hot_pixel",
-        m2_check=True,
-    ),
-    Case(
-        "C4",
-        "C",
-        _held_out("C4_drift", 303, drift_x_per_measurement_m=25e-6),
-        "iso_compliant",
-        fault="drift",
-    ),
-    Case(
-        "C5",
-        "C",
-        _held_out(
-            "C5_iris",
-            304,
-            aperture=Aperture(radius_m=0.35e-3, z_min_m=0.030, z_max_m=0.070),
+        Case(
+            "C2",
+            "C",
+            _held_out(
+                "C2_ghost_in_range",
+                c + 1,
+                ghost=Ghost(
+                    relative_power=0.12,
+                    offset_x_m=0.4e-3,
+                    offset_y_m=0.0,
+                    z_min_m=0.170,
+                    z_max_m=0.250,
+                ),
+            ),
+            "iso_compliant",
+            fault="ghost",
         ),
-        "iso_compliant",
-        fault="aperture",
-        m2_check=True,
-    ),
-]
+        Case(
+            "C3",
+            "C",
+            _held_out(
+                "C3_hot_pixels",
+                c + 2,
+                hot_pixels=HotPixels(
+                    pixels=((40, 470), (40, 471), (41, 470), (41, 471)),
+                    extra_counts=2500.0,
+                ),
+            ),
+            "iso_compliant",
+            fault="hot_pixel",
+            m2_check=True,
+        ),
+        Case(
+            "C4",
+            "C",
+            _held_out("C4_drift", c + 3, drift_x_per_measurement_m=25e-6),
+            "iso_compliant",
+            fault="drift",
+        ),
+        Case(
+            "C5",
+            "C",
+            _held_out(
+                "C5_iris",
+                c + 4,
+                aperture=Aperture(radius_m=0.35e-3, z_min_m=0.030, z_max_m=0.070),
+            ),
+            "iso_compliant",
+            fault="aperture",
+            m2_check=True,
+        ),
+    ]
+
+
+# Seeds per plan: v1 docs/evaluation-plan.md (run at 03fb2c1 with the then
+# default of 40 model calls), v2 docs/evaluation-plan-v2.md.
+PLANS: dict[str, dict[str, Any]] = {
+    "v1": {
+        "seeds": {"A": 100, "mystery": 1000, "B": 200, "C": 300},
+        "out_dir": Path("runs") / "evaluation",
+        "c_label": "C held out (C2-C5)",
+    },
+    "v2": {
+        "seeds": {"A": 500, "mystery": 3000, "B": 600, "C": 700},
+        "out_dir": Path("runs") / "evaluation-v2",
+        "c_label": "C2-C5 (seen in v1)",
+    },
+}
+CASES: list[Case] = build_cases(PLANS["v1"]["seeds"])
+C_LABEL = PLANS["v1"]["c_label"]
+
+
+def use_plan(name: str) -> None:
+    """Switch cases, output folder and labels to plan `name` (v1 or v2)."""
+    global CASES, OUT_DIR, RESULTS, C_LABEL
+    plan = PLANS[name]
+    CASES = build_cases(plan["seeds"])
+    OUT_DIR = plan["out_dir"]
+    RESULTS = OUT_DIR / "results.jsonl"
+    C_LABEL = plan["c_label"]
 
 
 def contenders(case: Case) -> list[str]:
@@ -508,7 +548,7 @@ def summary() -> str:
     lines += [
         "### Totals (correct / run)",
         "",
-        "| Contender | A | B | C held out (C2-C5) | C1 (seen) | Cost |",
+        f"| Contender | A | B | {C_LABEL} | C1 (seen) | Cost |",
         "|---|---|---|---|---|---|",
     ]
     for contender in ("agent", "agent-noview", "scripted", "naive"):
@@ -546,7 +586,9 @@ def main() -> int:
     mode.add_argument("--run", action="store_true", help="run every case")
     mode.add_argument("--summary", action="store_true", help="print result tables")
     parser.add_argument("--resume", action="store_true")
+    parser.add_argument("--plan", choices=sorted(PLANS), default="v1")
     args = parser.parse_args()
+    use_plan(args.plan)
     if args.oracle:
         for case in CASES:
             source = "plan" if case.expected is not None else "oracle"
