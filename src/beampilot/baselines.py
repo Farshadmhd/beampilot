@@ -200,6 +200,7 @@ class _ScriptedOperator:
         self.fit: dict[str, Any] | None = None
         self.exposure_hint = START_EXPOSURE_MS
         self.remeasured: set[float] = set()  # failed positions tried once more
+        self.tried: set[tuple[float, float]] = set()  # (z_mm, exposure_ms) measured
 
     def scout(self) -> None:
         """Measure 4 scout positions; refill towards the smallest beam.
@@ -345,6 +346,10 @@ class _ScriptedOperator:
         for attempt in range(MAX_TRIES):
             if not self._has_budget(1):
                 return None
+            # An identical repeat (same z, same exposure) cannot give anything new.
+            if (z_mm, exposure) in self.tried:
+                return None
+            self.tried.add((z_mm, exposure))
             result = measure_at(self.session, z_mm, exposure, reason)
             if "measurement_id" not in result:
                 return None
