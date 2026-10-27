@@ -169,3 +169,22 @@ All of these are dated 27 Oct 2026 and committed **before any evaluation run**.
    without `view_frame`. Up to 3 runs go in parallel. The budget is checked before
    each run starts, so at most the runs already going (≤ 2 × $0.50 per-run cap)
    can pass $4.
+8. **Scoring details and oracle output, fixed in `scripts/run_evaluation.py`
+   before any agent run.**
+   - Expected verdicts of the mystery beams from the oracle rule: A7–A10
+     `iso_compliant`, A11 `waist_not_accessible`, A12–A16 `iso_compliant`. As a
+     check, the rule gives the same verdicts as the table for A1–A6.
+   - B3 (x only): the `finish` guard does not allow `iso_compliant` while y
+     coverage is missing, so B3 is scored on the verdict the x axis alone supports.
+     It is `iso_compliant` if the final evaluation has x coverage met, x M²
+     determined, no M² < 1 flag on x and no general astigmatism;
+     `estimate_not_compliant` if x M² is determined; otherwise
+     `measurement_failed`.
+   - Violations are counted on `measure_at` calls that produced a measurement. B2
+     counts 1 if more than 12 positions were used.
+   - Fault noticed (agent only): the keywords are searched case-insensitively in
+     all tool-call reasons and the `finish` explanation.
+   - The scripted and naive contenders were run once, without any API call, while
+     the script was being tested. They are deterministic, so the evaluation run
+     reproduces those results. No agent run of an evaluation case happened before
+     this commit.
