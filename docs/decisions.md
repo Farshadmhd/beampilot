@@ -41,3 +41,23 @@ a 200 µm beam holding ~3·10⁶ counts, so the full-image first pass gave negat
 second moments on several near-waist frames. The thresholded pixels only choose
 the starting rectangle; they never enter the reported widths. Whether ISO/TR 11146-3
 prescribes a specific starting area: unverified.
+
+## 2026-10-27: ISO point coverage means at least 5 near and 5 far, per axis
+
+ISO 11146-1 asks for at least 10 positions, "about half" within one Rayleigh length
+of the waist and "about half" beyond two Rayleigh lengths. `coverage` reads this as
+at least 5 distinct positions with |z − z0| ≤ zR and at least 5 with |z − z0| ≥ 2 zR,
+evaluated separately for x and y with that axis's fitted z0 and zR. Repeated frames
+at one z count once. Positions between zR and 2 zR are counted but do not help.
+The thresholds are parameters (`min_near`, `min_far`) in case the standard text,
+which the maintainer still has to check, allows fewer.
+
+## 2026-10-27: Caustic fit uncertainties are scaled by the residual variance
+
+`fit_caustic` reports 1σ uncertainties from s² (JᵀJ)⁻¹ with s² = Σr² / (n − 3),
+like `curve_fit` with `absolute_sigma=False`. The repeat stds (from only 5 frames)
+therefore act as relative weights, and scatter beyond them, e.g. from position
+errors, still shows up in the uncertainty. With 2 % simulated noise the reported M²
+uncertainty matched the actual scatter over 300 seeds within ~10 %. Sampling only
+near the waist inflates the M² uncertainty by ~6× at ±0.5 zR, ~3× at ±0.7 zR and
+only ~1.8× at ±1 zR, compared with ISO sampling; no bias was seen at 2 % noise.
