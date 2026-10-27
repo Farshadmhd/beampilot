@@ -143,7 +143,7 @@ All of these are dated 27 Oct 2026 and committed **before any evaluation run**.
    | C5 | clean | 304 | Circular aperture in front of the sensor for 30 ≤ z ≤ 70 mm: `Aperture(radius_m=0.35e-3, z_min_m=0.030, z_max_m=0.070)`, centred on the beam axis; the profile is truncated, diffraction ignored | iso_compliant, M² within 3 % (clipped positions rejected or avoided) |
 
    Widths inside the range come out too small (−21 % at 30 mm, −11 % at 50 mm,
-   −1.4 % at 70 mm). This was checked once on the simulator, without the agent, to
+   about −1.5 to −2.5 % at 70 mm depending on exposure and noise). This was checked once on the simulator, without the agent, to
    make sure that **no current flag fires**. Far points are available outside the
    iris range below the waist (below 30 mm) and above it (170–250 mm). Fault-noticed
    keywords: "aperture", "iris", "truncat", "vignett", "cut off", "obstruct",
@@ -188,3 +188,22 @@ All of these are dated 27 Oct 2026 and committed **before any evaluation run**.
      the script was being tested. They are deterministic, so the evaluation run
      reproduces those results. No agent run of an evaluation case happened before
      this commit.
+9. **Caveats from the physics review, recorded before any agent run.**
+   - **C2 and C5 are only partly held out.** No fault is named in the prompt, but
+     the new look-triggers were written after seeing a ghost run. "Azimuth stays
+     tilted" and "one side of the waist does not match the other" fit C2 (a ghost
+     over 170–250 mm gives a tilted azimuth and a lopsided caustic) and C5. C2 and
+     C5 stay in the held-out totals as planned, and the report states this caveat
+     next to them.
+   - **C3 mainly breaks the exposure feedback, not the widths.** Whenever the beam
+     peak is below the hot cluster (2,500 counts), the frame maximum is the cluster.
+     `peak_counts` then reads about 2,500 whatever the exposure, `low_signal` never
+     fires, and at low exposure the width iteration locks onto the cluster
+     (`too_few_pixels` or `not_converged`). With a beam peak above 2,500 the widths
+     are biased by at most +0.3 %. The expected verdict is achievable, and the
+     baselines fail it (deviation 8). The agent may describe it as "beam too small"
+     without a fault keyword, so "fault noticed" for C3 is also checked by hand
+     against the reasons log.
+   - **The C4 keyword "centroid" is weak.** The agent can write "centroid" without
+     noticing drift. "Fault noticed" for C4 is also checked by hand; both the
+     keyword result and the hand check are reported.
