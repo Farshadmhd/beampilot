@@ -366,7 +366,14 @@ def background_drift_scenario(seed: int = 0) -> Scenario:
 
 
 def beam_too_large_scenario(seed: int = 0) -> Scenario:
-    """d0 300 um, M² 1.5: zR ~ 44 mm, the 3 x d area leaves the sensor near 3 zR."""
+    """d0 300 um, M² 1.5, zR ~ 44 mm: far-field points must stay in a narrow window.
+
+    The 3 x d area leaves the 2.8 mm sensor from about 3 zR (d ~ 0.94 mm),
+    and the stage reaches 4.5 zR, so naive far points are clipped. Positions
+    between 2 and ~2.8 zR on both sides of the waist still give 5 near + 5
+    far without clipping, so the expected verdict is ``iso_compliant``
+    through that narrow window, not a failure.
+    """
     beam = _beam(d0x_m=0.30e-3, d0y_m=0.30e-3, z0x_m=0.200, z0y_m=0.200)
     beam = replace(beam, m2x=1.5, m2y=1.5)
     return _scenario("beam_too_large", seed, beam=beam, stage_max_m=0.400)
