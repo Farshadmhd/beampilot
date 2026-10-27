@@ -263,8 +263,11 @@ def test_ghost_only_inside_its_z_window_and_offset_follows_z() -> None:
         {"relative_power": 0.0},
         {"relative_power": 0.1, "size_factor": 0.0},
         {"relative_power": 0.1, "z_min_m": 0.2, "z_max_m": 0.1},
+        {"relative_power": 0.1, "offset_x_m": float("nan")},
+        {"relative_power": 0.1, "offset_y_per_m": float("inf")},
     ],
 )
 def test_ghost_rejects_bad_parameters(kwargs) -> None:
+    kwargs = {"offset_x_m": 0.0, "offset_y_m": 0.0, **kwargs}
     with pytest.raises(ValueError):
-        Ghost(offset_x_m=0.0, offset_y_m=0.0, **kwargs)
+        Ghost(**kwargs)

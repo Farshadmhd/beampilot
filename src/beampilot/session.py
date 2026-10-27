@@ -146,7 +146,7 @@ class Measurement:
         ``"accept"`` or ``"reject"``.
     status : str
         ``"pending"``, ``"accept"`` or ``"reject"``.
-    frame : ndarray of int32, optional
+    frame : ndarray of uint16, optional
         First raw frame of the repeats, in counts (for ``view_frame``).
     """
 
@@ -162,7 +162,7 @@ class Measurement:
     details: dict[str, Any]
     suggested_verdict: str
     status: str = "pending"
-    frame: NDArray[np.int32] | None = None
+    frame: NDArray[np.uint16] | None = None
 
 
 class MeasurementSession:
@@ -506,9 +506,11 @@ def different_waists_scenario(seed: int = 0) -> Scenario:
 def ghost_everywhere_scenario(seed: int = 0) -> Scenario:
     """Clean beam with a reflection (15 % power, 0.54 mm away) at every z.
 
-    Second-moment widths include the ghost wherever it is on the sensor, so
-    no position gives true ISO widths. Expected verdict: measurement_failed,
-    with the ghost named as the cause.
+    The widths include the ghost wherever it falls inside the iterated 3·d
+    integration area: always away from the waist; near the waist it depends
+    on the frame, because 15 % is close to the 1/e² start threshold. No
+    caustic of true ISO widths can be built. Expected verdict:
+    measurement_failed, with the ghost named as the cause.
     """
     ghost = Ghost(relative_power=0.15, offset_x_m=0.45e-3, offset_y_m=-0.30e-3)
     return _scenario("ghost_everywhere", seed, ghost=ghost)
@@ -518,7 +520,7 @@ def ghost_in_range_scenario(seed: int = 0) -> Scenario:
     """Clean beam with a reflection (15 % power, 0.5 mm away) for 150-200 mm.
 
     Measurements in that range are wrong; ISO coverage is still possible with
-    near points around the 120 mm waist and far points below ~63 mm and above
+    near points around the 120 mm waist and far points below ~70 mm and above
     200 mm. Expected verdict: iso_compliant, with the ghost positions rejected.
     """
     ghost = Ghost(

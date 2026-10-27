@@ -324,7 +324,7 @@ def measure_at(
         flags=flags,
         details=details,
         suggested_verdict="reject" if reasons else "accept",
-        frame=frames[0],
+        frame=frames[0].astype(np.uint16),  # 12-bit counts: half the memory
     )
     session.add_measurement(measurement)
     return {
@@ -403,6 +403,7 @@ def view_frame(
         "image_px": [camera.nx, camera.ny],
         "pixel_size_um": _num(camera.pixel_size_m * 1e6, 3),
         "brightness_scale": "square root: black = dark level, yellow = full scale",
+        "orientation": "row 0 at the top; +x to the right, +y down (as centroid_um)",
         "views_left": session.views_left,
         "image_id": image_id,
     }

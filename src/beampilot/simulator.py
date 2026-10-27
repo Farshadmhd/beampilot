@@ -152,6 +152,9 @@ class Ghost:
             raise ValueError(f"size_factor must be > 0, got {self.size_factor}")
         if not self.z_max_m >= self.z_min_m:
             raise ValueError("z_max_m must be >= z_min_m")
+        for name in ("offset_x_m", "offset_y_m", "offset_x_per_m", "offset_y_per_m"):
+            if not np.isfinite(getattr(self, name)):
+                raise ValueError(f"{name} must be finite, got {getattr(self, name)}")
 
     def present_at(self, z_m: float) -> bool:
         """True if the ghost is on the sensor at stage position `z_m` (m)."""

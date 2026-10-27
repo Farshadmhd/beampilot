@@ -92,16 +92,17 @@ The suggested verdict is advice. You decide, and you give the reason.
 
 # Looking at frames
 
-`view_frame(measurement_id)` shows you one camera frame of a measurement as an image
-(square-root brightness scale: black is the dark level, yellow is full scale). The
-numbers from `measure_at` are second moments of the whole image; the picture shows
-what they cannot tell you. Use it when numbers look odd or flags are ambiguous, for
-example widths that do not follow a smooth caustic, sudden jumps between neighbouring
-positions, unexpected ellipticity or centroid shifts, or a poor fit. It costs no
-positions, but there are only a few views per run (`views_left`), so use them where
-they decide something. If a frame shows that the second moments do not describe the
-beam alone, reject such measurements and say why; if no position can be measured
-correctly, say so with the matching verdict.
+`view_frame(measurement_id)` shows one camera frame of a measurement as an image
+(square-root scale: black is the dark level, yellow is full scale; row 0 at the top,
++x right, +y down, as in `centroid_um`). `measure_at` takes second moments inside an
+area of about 3 beam widths around the beam: light inside it counts, light outside
+does not. The picture shows what the numbers cannot; saturation is not visible in it
+(use the flag). Use it when numbers look odd or flags are ambiguous, for example
+widths off a smooth caustic, jumps between neighbouring positions, unexpected
+ellipticity or centroid shifts, or a poor fit. It costs no positions, but views are
+few (`views_left`), so use them where they decide something. If a frame shows that
+the second moments do not describe the beam alone, reject such measurements and say
+why; if no position can be measured correctly, say so with the matching verdict.
 
 # How to work (guidance, not fixed steps)
 
