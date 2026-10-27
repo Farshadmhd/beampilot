@@ -167,3 +167,37 @@ error stops the run with a logged reason. Hard limits per run: 40 model calls,
 1.5 M tokens, $0.50. The first six real runs (seed 0, muse-spark-1.2, effort low)
 gave the expected verdict on every scenario with M² within 0.5 %; they used the
 prompt before the review fixes in this branch (number rule, background advice).
+
+## 2026-10-27: Waist numbers need a point within ±1 zR; accessibility from ±2σ
+
+Replaces the "waist inside the measured z range" test. d0, z0, zR and M² of an axis
+are null only if the fit failed or no accepted position lies within ±1 zR of the
+fitted waist. That still catches the collapse (far-field-only data: zR → 0 leaves no
+point within ±1 zR) but keeps sound fits whose waist lies just outside the measured
+span (e.g. waist 25 mm, nearest scout 31 mm). `waist_side` says below / above the
+measured positions or `within` a gap (`waist_gap_mm`).
+
+Waist accessibility is now one of three states from z0 ± 2σ(z0) against the stage:
+`inside`, `outside` or `uncertain` (`waist_near_stage_end` says which end). Only
+`outside` supports `waist_not_accessible`. A far-field-only fit can misplace the
+waist, so operators (scripted baseline, agent prompt) measure as close as possible
+to that stage end before concluding `outside`. Scripted sweep, seeds 0-9: waists 2 mm
+from either end are now iso_compliant 10/10 (before: 5/10 wrongly
+waist_not_accessible); waist_outside_range stays waist_not_accessible 10/10.
+
+## 2026-10-27: Stricter finish guard and a controller fallback report
+
+`finish` also refuses `iso_compliant` when general astigmatism or M² < 1 is flagged.
+When a hard limit or an API error stops the agent, the controller writes the report
+itself: `estimate_not_compliant` if M² is determined on both axes, otherwise
+`measurement_failed`, with `stopped_by_limit` set to the reason, so every run ends
+with a report built from session state.
+
+## 2026-10-27: Known limitation: extreme simple astigmatism
+
+The scripted baseline skips planned positions where the predicted beam (either axis)
+is wider than half the sensor (`MAX_D_PER_SENSOR = 0.5`). For x and y waists far
+apart (e.g. 20 mm and 230 mm, 8.5 zR), the near points of one axis are blocked by the
+size of the other axis there, although such frames are only `roi_clipped` and could
+be accepted; the run ends `estimate_not_compliant` with budget left. A per-axis
+check against the clipping-loss estimate would fix it; left as is for now.

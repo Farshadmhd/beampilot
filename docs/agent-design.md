@@ -57,16 +57,25 @@ Every tool has a required `reason` string. Tool schemas are strict, and verdicts
      ("x: 3 within ±1 zR, need about 5; 1 beyond 2 zR, need about 5"),
      waist inside stage range (yes/no), general-astigmatism check, M² < 1 sanity flag,
      and a compact table of all measurements.
-   - If an axis fit fails, or its fitted waist lies outside the measured z range, d0, z0,
-     zR and M² of that axis are reported as null with a `not_determined` reason (and
-     `waist_side`: below/above the measured range), never as an extrapolated number.
-     The same applies to the `finish` report.
+   - If an axis fit fails, or no accepted position lies within ±1 zR of its fitted waist,
+     d0, z0, zR and M² of that axis are reported as null with a `not_determined` reason
+     (and `waist_side`: below/above the measured positions or within a gap,
+     `waist_gap_mm`), never as an extrapolated number. The same applies to the `finish`
+     report.
+   - Waist accessibility per axis from z0 ± 2σ against the stage range: `inside`,
+     `outside` or `uncertain` (then `waist_near_stage_end`: measure closer to that end).
+     Only `outside` supports the `waist_not_accessible` verdict.
 5. `finish(verdict, explanation)`
    - `verdict` is one of: `iso_compliant`, `estimate_not_compliant`, `waist_not_accessible`,
      `general_astigmatism_out_of_scope`, `measurement_failed`.
    - Python builds the report numbers from stored state. The model writes only the verdict and the text.
    - Guardrail: if the model claims `iso_compliant` but `evaluate` says coverage is not met,
-     the controller returns an error and the agent must continue or choose another verdict.
+     or flags general astigmatism or M² < 1, the controller returns an error and the agent
+     must continue or choose another verdict.
+   - If a hard limit (model calls, tokens, cost) or an API error stops the agent first,
+     Python writes a fallback report from session state: `estimate_not_compliant` if M²
+     is determined on both axes, otherwise `measurement_failed`, with `stopped_by_limit`
+     holding the reason.
 6. `retake_darks(reason)`
    - Blocks the beam and takes a fresh dark set (50 frames) with the current background, so a
      background change (e.g. room light switched on) becomes part of the dark.
