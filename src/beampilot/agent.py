@@ -52,7 +52,12 @@ TASK = (
     "the standard allows. Start with get_setup. The run ends only when finish "
     "succeeds."
 )
+OPERATOR_NOTE_PREFIX = (
+    "Operator note (from the person at the bench; the tools do not enforce it, "
+    "so respect it yourself): "
+)
 RETRIES = 2
+CALL_TIMEOUT_S = 120.0  # per model call; slow reasoning replies take ~20 s
 RETRY_DELAY_S = 2.0
 TRANSIENT_ERRORS = {
     "APIConnectionError",
@@ -208,10 +213,12 @@ class AgentRun:
     cost_usd: float = 0.0
     stop_reason: str = ""
     report: dict[str, Any] | None = None
+    operator_note: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "config": asdict(self.config),
+            "operator_note": self.operator_note,
             "stop_reason": self.stop_reason,
             "model_calls": len(self.steps),
             "usage": {**asdict(self.usage), "total_tokens": self.usage.total_tokens},
@@ -244,7 +251,10 @@ def make_client() -> Any:
     if not api_key:
         raise RuntimeError("MODEL_API_KEY is not set (see .env.example)")
     # Retries are handled in run_agent (transient errors only), not by the SDK.
-    return OpenAI(api_key=api_key, base_url=BASE_URL, max_retries=0)
+    # A timeout per call keeps one hung request from blocking a run for long.
+    return OpenAI(
+        api_key=api_key, base_url=BASE_URL, max_retries=0, timeout=CALL_TIMEOUT_S
+    )
 
 
 def call_cost_usd(usage: Usage, model: str) -> float:
@@ -263,12 +273,18 @@ def run_agent(
     client: Any,
     config: AgentConfig | None = None,
     on_step: Callable[[dict[str, Any]], None] | None = None,
+    on_model_reply: Callable[[dict[str, Any]], None] | None = None,
+    on_tool_call: Callable[[dict[str, Any]], None] | None = None,
+    operator_note: str | None = None,
+    should_stop: Callable[[], bool | str | None] | None = None,
 ) -> AgentRun:
     """Run the agent until ``finish`` succeeds or a hard limit is hit.
 
     Every function call of a turn is executed through :mod:`beampilot.tools`
     in the order the model gave them, and all results go back in the next
-    call. A turn without function calls gets a short nudge.
+    call. A turn without function calls gets a short nudge. Callbacks run in
+    the calling thread; faults for a demo are injected separately with
+    :meth:`MeasurementSession.request_faults`.
 
     Parameters
     ----------
@@ -279,7 +295,21 @@ def run_agent(
     config : AgentConfig, optional
         Model, effort and limits.
     on_step : callable, optional
-        Called with each step's log entry, e.g. to print progress.
+        Called with each step's log entry after its tool calls ran.
+    on_model_reply : callable, optional
+        Called as soon as a model reply arrives, before its tool calls run,
+        with the step entry (call number, usage, cost, text).
+    on_tool_call : callable, optional
+        Called after each tool call with its entry (name, arguments, reason,
+        result).
+    operator_note : str, optional
+        Plain-language note from the person at the bench (e.g. a blocked z
+        range). Added to the first message and logged; the tools do not
+        enforce it.
+    should_stop : callable, optional
+        Checked before every model call (e.g. a cancel flag set when the demo
+        user closes the tab). A truthy result stops the run like a hard limit;
+        a string result becomes the stop reason.
 
     Returns
     -------
@@ -289,14 +319,22 @@ def run_agent(
         (:func:`beampilot.tools.fallback_report`).
     """
     config = config or AgentConfig()
-    run = AgentRun(config=config)
+    note = (operator_note or "").strip() or None
+    run = AgentRun(config=config, operator_note=note)
     instructions = system_prompt()
+    task = TASK if note is None else f"{TASK}\n\n{OPERATOR_NOTE_PREFIX}{note}"
     # Stateless conversation: the full history is resent on every call, with
     # the reasoning replayed from its encrypted content. Server-stored
     # responses (previous_response_id) expired during parallel runs.
-    history: list[dict[str, Any]] = [{"role": "user", "content": TASK}]
+    history: list[dict[str, Any]] = [{"role": "user", "content": task}]
 
     for call_number in range(1, config.max_model_calls + 1):
+        stop = should_stop() if should_stop is not None else None
+        if stop:
+            run.stop_reason = (
+                stop if isinstance(stop, str) else "cancelled by the controller"
+            )
+            break
         if run.usage.total_tokens >= config.max_total_tokens:
             run.stop_reason = f"token budget reached ({run.usage.total_tokens})"
             break
@@ -317,7 +355,7 @@ def run_agent(
                 include=["reasoning.encrypted_content"],
             )
         except Exception as exc:  # noqa: BLE001 - log and stop cleanly
-            run.stop_reason = f"API error: {type(exc).__name__}: {exc}"
+            run.stop_reason = api_error_text(exc)
             break
         latency = time.perf_counter() - start
         usage = _usage(response)
@@ -334,12 +372,16 @@ def run_agent(
             "text": getattr(response, "output_text", "") or "",
             "tool_calls": [],
         }
+        if on_model_reply is not None:
+            on_model_reply(dict(step))
         outputs = []
         for item in response.output:
             if getattr(item, "type", None) != "function_call":
                 continue
             entry, result = _execute(session, item)
             step["tool_calls"].append(entry)
+            if on_tool_call is not None:
+                on_tool_call(entry)
             outputs.append(
                 {
                     "type": "function_call_output",
@@ -371,6 +413,18 @@ def save_run(run: AgentRun, path: Path, extra: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     document = {**extra, **run.to_dict()}
     path.write_text(json.dumps(document, indent=2, ensure_ascii=False), "utf-8")
+
+
+def api_error_text(exc: BaseException) -> str:
+    """Safe description of an API error: type and HTTP status only.
+
+    The message text is left out on purpose: it comes from the server and could
+    contain (parts of) the API key, and it ends up in the UI, the report and
+    the saved run file.
+    """
+    status = getattr(exc, "status_code", None)
+    suffix = f" (HTTP {status})" if isinstance(status, int) else ""
+    return f"API error: {type(exc).__name__}{suffix}"
 
 
 def _create_with_retry(client: Any, **request: Any) -> Any:

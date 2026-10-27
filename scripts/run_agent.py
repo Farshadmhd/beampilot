@@ -27,7 +27,13 @@ from beampilot.agent import (
     run_agent,
     save_run,
 )
-from beampilot.session import SCENARIOS, MeasurementSession, reveal_truth
+from beampilot.session import (
+    SCENARIOS,
+    MeasurementSession,
+    random_scenario,
+    reveal_truth,
+    session_record,
+)
 
 RUNS_DIR = Path(__file__).resolve().parents[1] / "runs"
 
@@ -82,15 +88,21 @@ def main() -> int:
     # and flush each line so a redirected log shows progress.
     sys.stdout.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--scenario", choices=sorted(SCENARIOS), default="clean")
+    parser.add_argument(
+        "--scenario", choices=[*sorted(SCENARIOS), "mystery"], default="clean"
+    )
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--note", default=None, help="operator note for the agent")
     parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument("--effort", default=DEFAULT_EFFORT)
     parser.add_argument("--max-calls", type=int, default=40)
     parser.add_argument("--max-cost", type=float, default=0.50, help="USD per run")
     args = parser.parse_args()
 
-    session = MeasurementSession(SCENARIOS[args.scenario](seed=args.seed))
+    factory = (
+        random_scenario if args.scenario == "mystery" else SCENARIOS[args.scenario]
+    )
+    session = MeasurementSession(factory(seed=args.seed))
     config = AgentConfig(
         model=args.model,
         reasoning_effort=args.effort,
@@ -101,7 +113,11 @@ def main() -> int:
         f"== Agent run: {args.scenario}, seed {args.seed}, {args.model}, "
         f"effort {args.effort}"
     )
-    run = run_agent(session, make_client(), config, on_step=print_step)
+    if args.note:
+        print(f"   operator note: {args.note}")
+    run = run_agent(
+        session, make_client(), config, on_step=print_step, operator_note=args.note
+    )
 
     print(f"\n== Stop reason: {run.stop_reason}")
     print("\n== Report")
@@ -124,13 +140,7 @@ def main() -> int:
     save_run(
         run,
         path,
-        {
-            "scenario": args.scenario,
-            "seed": args.seed,
-            "positions_used": session.positions_used,
-            "truth": truth,
-            "tool_log": session.log,
-        },
+        {"scenario": args.scenario, "seed": args.seed, **session_record(session)},
     )
     print(f"   saved {path}")
     return 0 if run.stop_reason == "finished" else 2

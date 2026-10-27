@@ -1,6 +1,8 @@
 """Agent loop tests with a fake client: no API calls."""
 
 import json
+import threading
+import time
 from dataclasses import replace
 from types import SimpleNamespace
 
@@ -301,10 +303,110 @@ def test_api_error_stops_cleanly() -> None:
 
     client = FakeClient([fail])
     run = run_agent(_session(), client)
-    assert run.stop_reason == "API error: ConnectionError: network down"
+    # Type only: the message text could carry server text (e.g. a masked key).
+    assert run.stop_reason == "API error: ConnectionError"
     assert run.steps == []
     assert run.report["verdict"] == "measurement_failed"
     assert run.report["stopped_by_limit"] == run.stop_reason
+
+
+def test_hooks_fire_per_reply_and_per_tool_call_in_order() -> None:
+    events = []
+    client = FakeClient(
+        [
+            _response(_call("get_setup"), _call("evaluate"), text="looking"),
+            _response(_call("finish", verdict="measurement_failed", explanation="x")),
+        ]
+    )
+    run_agent(
+        _session(),
+        client,
+        on_model_reply=lambda step: events.append(
+            ("reply", step["call"], step["text"])
+        ),
+        on_tool_call=lambda call: events.append(("tool", call["name"])),
+        on_step=lambda step: events.append(("step", step["call"])),
+    )
+    assert events == [
+        ("reply", 1, "looking"),
+        ("tool", "get_setup"),
+        ("tool", "evaluate"),
+        ("step", 1),
+        ("reply", 2, ""),
+        ("tool", "finish"),
+        ("step", 2),
+    ]
+
+
+def test_operator_note_reaches_the_agent_and_the_run_file() -> None:
+    client = FakeClient(
+        [_response(_call("finish", verdict="measurement_failed", explanation="x"))]
+    )
+    run = run_agent(_session(), client, operator_note="  avoid z 80-100 mm ")
+    first = client.requests[0]["input"][0]["content"]
+    assert first.endswith("avoid z 80-100 mm")
+    assert "do not enforce it" in first
+    assert run.operator_note == "avoid z 80-100 mm"
+    assert run.to_dict()["operator_note"] == "avoid z 80-100 mm"
+    no_note = run_agent(
+        _session(),
+        FakeClient(
+            [_response(_call("finish", verdict="measurement_failed", explanation="x"))]
+        ),
+    )
+    assert no_note.operator_note is None
+
+
+def test_fault_injected_during_a_run_hits_the_next_measurement() -> None:
+    """A demo button calls request_faults from another thread while the loop
+    runs; the next measure_at sees it."""
+    session = _session()
+
+    def press_button_then_measure():
+        threading.Thread(
+            target=session.request_faults, kwargs={"extra_background_counts": 3.0}
+        ).start()
+        time.sleep(0.05)
+        return _response(_call("measure_at", z_mm=120.0, exposure_ms=1.5))
+
+    client = FakeClient(
+        [
+            _response(_call("measure_at", z_mm=120.0, exposure_ms=1.5)),
+            press_button_then_measure,
+            _response(_call("finish", verdict="measurement_failed", explanation="x")),
+        ]
+    )
+    run = run_agent(session, client)
+    first, second = (s["tool_calls"][0]["result"] for s in run.steps[:2])
+    assert not first["flags"]["background_changed"]
+    assert second["flags"]["background_changed"]
+    assert session.fault_events[0]["source"] == "operator"
+
+
+def test_api_error_text_has_type_and_status_but_no_message() -> None:
+    class AuthenticationError(Exception):
+        status_code = 401
+
+    def fail():
+        raise AuthenticationError("Incorrect API key provided: sk-SECRET123456")
+
+    run = run_agent(_session(), FakeClient([fail]))
+    assert run.stop_reason == "API error: AuthenticationError (HTTP 401)"
+    assert "SECRET" not in json.dumps(run.to_dict())
+
+
+def test_should_stop_cancels_before_the_next_model_call() -> None:
+    calls = {"n": 0}
+
+    def stop_after_two() -> bool:
+        calls["n"] += 1
+        return calls["n"] > 2
+
+    client = FakeClient([_response(_call("get_setup")) for _ in range(5)])
+    run = run_agent(_session(), client, should_stop=stop_after_two)
+    assert len(client.requests) == 2
+    assert run.stop_reason == "cancelled by the controller"
+    assert run.report["stopped_by_limit"] == "cancelled by the controller"
 
 
 def test_requests_never_contain_the_hidden_truth() -> None:

@@ -211,7 +211,7 @@ The Jacobian σ(M²) misses systematic errors (one-sided data, the shared dark),
 true M² = 1.0 beam fitted 0.997 with a tiny σ was flagged as M² < 1 and `finish` then
 refused a correct `iso_compliant` (scripted, 1 of 10 seeds). The flag now uses
 σ floored at 1 % of M² (`M2_STD_FLOOR_REL`). This deviates from the plain
-"M² + 2σ < 1" rule asked for earlier; the maintainer should confirm.
+"M² + 2σ < 1" rule asked for earlier; confirmed by the maintainer on 27 Oct 2026.
 
 σ(z0) is just as optimistic: after far-field-only scouts a waist 2 mm inside the stage
 was reported `outside` at 10σ. So `finish` refuses `waist_not_accessible` unless an
