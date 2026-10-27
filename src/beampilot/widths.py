@@ -247,9 +247,22 @@ def second_moments(image: ArrayLike, pixel_size_m: float, roi: Roi) -> Moments:
     Moments
         Centroid in m and second moments in m². All NaN if the summed
         intensity inside the ROI is not positive.
+
+    Raises
+    ------
+    ValueError
+        If `pixel_size_m` is not positive, or the ROI is empty, has negative
+        indices or reaches outside the image.
     """
+    # Written as "not x > 0" so that NaN is rejected too.
+    if not pixel_size_m > 0:
+        raise ValueError(f"pixel_size_m must be > 0, got {pixel_size_m}")
     image = np.asarray(image, dtype=np.float64)
     ny, nx = image.shape
+    if not (
+        0 <= roi.x_start < roi.x_stop <= nx and 0 <= roi.y_start < roi.y_stop <= ny
+    ):
+        raise ValueError(f"roi {roi} is empty or outside the image ({ny}, {nx})")
     sub = image[roi.y_start : roi.y_stop, roi.x_start : roi.x_stop]
     x_m = (np.arange(roi.x_start, roi.x_stop) - (nx - 1) / 2.0) * pixel_size_m
     y_m = (np.arange(roi.y_start, roi.y_stop) - (ny - 1) / 2.0) * pixel_size_m
@@ -312,10 +325,12 @@ def measure_widths(
     Raises
     ------
     ValueError
-        If `max_iter` is below 1.
+        If `max_iter` is below 1 or `pixel_size_m` is not positive.
     """
     if max_iter < 1:
         raise ValueError(f"max_iter must be >= 1, got {max_iter}")
+    if not pixel_size_m > 0:
+        raise ValueError(f"pixel_size_m must be > 0, got {pixel_size_m}")
     image = np.asarray(image, dtype=np.float64)
     ny, nx = image.shape
     roi = Roi(0, nx, 0, ny)

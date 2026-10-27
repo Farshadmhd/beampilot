@@ -13,8 +13,10 @@ from beampilot.simulator import (
     render_frame,
 )
 from beampilot.widths import (
+    Roi,
     mean_dark,
     measure_widths,
+    second_moments,
     subtract_background,
     width_statistics,
 )
@@ -199,6 +201,30 @@ def test_no_beam_gives_nan_not_crash(level: float) -> None:
     result = measure_widths(image, PIXEL_M)
     assert np.isnan(result.d_x_m) and np.isnan(result.d_y_m)
     assert not result.converged
+
+
+@pytest.mark.parametrize(
+    "roi",
+    [
+        Roi(-1, 10, 0, 10),  # negative start
+        Roi(0, 65, 0, 10),  # past the right edge
+        Roi(0, 10, 0, 65),  # past the bottom edge
+        Roi(10, 10, 0, 10),  # empty
+        Roi(20, 10, 0, 10),  # reversed
+    ],
+)
+def test_second_moments_rejects_bad_roi(roi: Roi) -> None:
+    with pytest.raises(ValueError, match="roi"):
+        second_moments(np.ones((64, 64)), PIXEL_M, roi)
+
+
+@pytest.mark.parametrize("pixel_size_m", [0.0, -5.5e-6, np.nan])
+def test_non_positive_pixel_size_raises(pixel_size_m: float) -> None:
+    image = _rotated_ellipse(10.0, 10.0, 0.0, n=64)
+    with pytest.raises(ValueError, match="pixel_size_m"):
+        second_moments(image, pixel_size_m, Roi(0, 64, 0, 64))
+    with pytest.raises(ValueError, match="pixel_size_m"):
+        measure_widths(image, pixel_size_m)
 
 
 def test_fewer_than_ten_dark_frames_raises() -> None:
