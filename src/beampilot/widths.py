@@ -162,6 +162,8 @@ class Moments:
         Second moments sigma_x² and sigma_y² about the centroid, in m².
     cov_xy_m2 : float
         Mixed second moment sigma_xy about the centroid, in m².
+    total_counts : float
+        Sum of the pixel values inside the ROI, in counts.
     """
 
     x_c_m: float
@@ -169,6 +171,7 @@ class Moments:
     var_x_m2: float
     var_y_m2: float
     cov_xy_m2: float
+    total_counts: float
 
 
 @dataclass(frozen=True)
@@ -193,6 +196,15 @@ class WidthResult:
         True if d_x and d_y changed by less than `rtol` between the last two
         integration areas, or if the next integration area would repeat one
         already used.
+    roi : Roi
+        Integration area of the last moment calculation, in pixel indices.
+    roi_sum_counts : float
+        Sum of the background-corrected pixel values inside `roi`, in counts.
+    roi_clipped : bool
+        True if the 3 * d_x by 3 * d_y rectangle around the final centroid
+        reaches past the image edge and had to be cut. The beam is then
+        truncated and the widths are biased low; the result must not be
+        trusted even when ``converged`` is True.
     """
 
     d_x_m: float
@@ -203,6 +215,9 @@ class WidthResult:
     ellipticity: float
     iterations: int
     converged: bool
+    roi: Roi
+    roi_sum_counts: float
+    roi_clipped: bool
 
 
 @dataclass(frozen=True)
@@ -267,9 +282,9 @@ def second_moments(image: ArrayLike, pixel_size_m: float, roi: Roi) -> Moments:
     x_m = (np.arange(roi.x_start, roi.x_stop) - (nx - 1) / 2.0) * pixel_size_m
     y_m = (np.arange(roi.y_start, roi.y_stop) - (ny - 1) / 2.0) * pixel_size_m
 
-    total = sub.sum()
+    total = float(sub.sum())
     if not total > 0:
-        return Moments(np.nan, np.nan, np.nan, np.nan, np.nan)
+        return Moments(np.nan, np.nan, np.nan, np.nan, np.nan, total)
     profile_x = sub.sum(axis=0)
     profile_y = sub.sum(axis=1)
     x_c = float(profile_x @ x_m / total)
@@ -282,6 +297,7 @@ def second_moments(image: ArrayLike, pixel_size_m: float, roi: Roi) -> Moments:
         var_x_m2=float(profile_x @ dx**2 / total),
         var_y_m2=float(profile_y @ dy**2 / total),
         cov_xy_m2=float(dy @ sub @ dx / total),
+        total_counts=total,
     )
 
 
@@ -342,7 +358,7 @@ def measure_widths(
         moments = second_moments(image, pixel_size_m, roi)
         # Written as "not x > 0" so that NaN moments also fail here.
         if not (moments.var_x_m2 > 0 and moments.var_y_m2 > 0):
-            return _failed_result(moments, iteration)
+            return _failed_result(moments, iteration, roi)
         d_x = 4.0 * np.sqrt(moments.var_x_m2)
         d_y = 4.0 * np.sqrt(moments.var_y_m2)
         if previous is not None and (
@@ -353,7 +369,7 @@ def measure_widths(
             break
         previous = (d_x, d_y)
         seen.add(roi)
-        next_roi = _integration_area(moments, d_x, d_y, pixel_size_m, nx, ny)
+        next_roi, _ = _integration_area(moments, d_x, d_y, pixel_size_m, nx, ny)
         # With noise the rectangle can flip by one pixel each pass; once it
         # repeats, further passes only cycle through the same areas.
         if next_roi in seen:
@@ -361,6 +377,7 @@ def measure_widths(
             break
         roi = next_roi
 
+    _, roi_clipped = _integration_area(moments, d_x, d_y, pixel_size_m, nx, ny)
     azimuth, ellipticity = _azimuth_and_ellipticity(moments)
     return WidthResult(
         d_x_m=float(d_x),
@@ -371,6 +388,9 @@ def measure_widths(
         ellipticity=ellipticity,
         iterations=iteration,
         converged=converged,
+        roi=roi,
+        roi_sum_counts=moments.total_counts,
+        roi_clipped=roi_clipped,
     )
 
 
@@ -411,19 +431,28 @@ def width_statistics(results: Sequence[WidthResult]) -> WidthStatistics:
 
 def _integration_area(
     moments: Moments, d_x: float, d_y: float, pixel_size_m: float, nx: int, ny: int
-) -> Roi:
-    """Rectangle of 3 * d_x by 3 * d_y centred on the centroid, clipped."""
+) -> tuple[Roi, bool]:
+    """Rectangle of 3 * d_x by 3 * d_y centred on the centroid, clipped.
+
+    Also returns True if the rectangle had to be cut at the image edge.
+    """
     x_c_px = moments.x_c_m / pixel_size_m + (nx - 1) / 2.0
     y_c_px = moments.y_c_m / pixel_size_m + (ny - 1) / 2.0
     half_x_px = 1.5 * d_x / pixel_size_m
     half_y_px = 1.5 * d_y / pixel_size_m
     # Include every pixel whose centre lies inside the rectangle.
-    return Roi(
-        x_start=max(0, int(np.ceil(x_c_px - half_x_px))),
-        x_stop=min(nx, int(np.floor(x_c_px + half_x_px)) + 1),
-        y_start=max(0, int(np.ceil(y_c_px - half_y_px))),
-        y_stop=min(ny, int(np.floor(y_c_px + half_y_px)) + 1),
+    x_start = int(np.ceil(x_c_px - half_x_px))
+    x_stop = int(np.floor(x_c_px + half_x_px)) + 1
+    y_start = int(np.ceil(y_c_px - half_y_px))
+    y_stop = int(np.floor(y_c_px + half_y_px)) + 1
+    clipped = x_start < 0 or y_start < 0 or x_stop > nx or y_stop > ny
+    roi = Roi(
+        x_start=max(0, x_start),
+        x_stop=min(nx, x_stop),
+        y_start=max(0, y_start),
+        y_stop=min(ny, y_stop),
     )
+    return roi, clipped
 
 
 def _azimuth_and_ellipticity(moments: Moments) -> tuple[float, float]:
@@ -437,8 +466,11 @@ def _azimuth_and_ellipticity(moments: Moments) -> tuple[float, float]:
     return float(azimuth), float(ellipticity)
 
 
-def _failed_result(moments: Moments, iterations: int) -> WidthResult:
-    """Result for a frame whose second moments are not positive."""
+def _failed_result(moments: Moments, iterations: int, roi: Roi) -> WidthResult:
+    """Result for a frame whose second moments are not positive.
+
+    ``roi_clipped`` is False because no 3 * d rectangle could be formed.
+    """
     return WidthResult(
         d_x_m=np.nan,
         d_y_m=np.nan,
@@ -448,4 +480,7 @@ def _failed_result(moments: Moments, iterations: int) -> WidthResult:
         ellipticity=np.nan,
         iterations=iterations,
         converged=False,
+        roi=roi,
+        roi_sum_counts=moments.total_counts,
+        roi_clipped=False,
     )

@@ -83,6 +83,36 @@ def test_noiseless_centred_beam() -> None:
     assert result.d_y_m == pytest.approx(true_y, rel=0.005)
 
 
+def test_centred_beam_roi_not_clipped_and_holds_the_signal() -> None:
+    frame = render_frame(BEAM, NOISELESS, Z_M, EXPOSURE_MS, np.random.default_rng(0))
+    result = measure_widths(frame, PIXEL_M)
+    assert not result.roi_clipped
+    roi = result.roi
+    assert 0 < roi.x_start < roi.x_stop < NOISELESS.nx
+    assert 0 < roi.y_start < roi.y_stop < NOISELESS.ny
+    # The 3 x d rectangle spans +-6 sigma, so it holds practically all signal.
+    total_counts = NOISELESS.signal_counts_per_ms * EXPOSURE_MS
+    assert result.roi_sum_counts == pytest.approx(total_counts, rel=0.005)
+    assert result.roi_sum_counts == pytest.approx(
+        frame[roi.y_start : roi.y_stop, roi.x_start : roi.x_stop].sum()
+    )
+
+
+def test_beam_cut_by_sensor_edge_flags_roi_clipped() -> None:
+    """A beam 1.35 mm off-centre on a 2.8 mm sensor converges ~34 % too small.
+
+    Nothing else in the result reveals this, so roi_clipped must.
+    """
+    rng = np.random.default_rng(0)
+    frame = render_frame(BEAM, NOISELESS, Z_M, EXPOSURE_MS, rng, x0_m=1.35e-3)
+    result = measure_widths(frame, PIXEL_M)
+    true_x, _ = _true_diameters(BEAM, Z_M)
+    assert result.converged
+    assert result.d_x_m < 0.8 * true_x  # the bias the flag warns about
+    assert result.roi_clipped
+    assert result.roi.x_stop == NOISELESS.nx
+
+
 def test_off_centre_beam_gives_same_width_and_correct_centroid() -> None:
     x0_m, y0_m = 300e-6, -200e-6
     rng = np.random.default_rng(0)
