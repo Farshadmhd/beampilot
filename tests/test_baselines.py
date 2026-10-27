@@ -1,6 +1,7 @@
 """Tests for the scripted baselines on the six simulated scenarios."""
 
 import inspect
+from dataclasses import replace
 
 import pytest
 
@@ -139,6 +140,44 @@ def test_naive_runs_to_finish(name: str) -> None:
 )
 def test_suggest_verdict_rules(evaluation: dict, expected: str) -> None:
     assert suggest_verdict(evaluation) == expected
+
+
+def test_collapsed_fit_predicts_nothing() -> None:
+    axis = {"fit_success": True, "d0_um": 0.0, "z0_mm": -40.0, "z_r_mm": 0.0}
+    assert baselines._predicted_d_um(axis, 100.0) is None
+    good = {"fit_success": True, "d0_um": 200.0, "z0_mm": 120.0, "z_r_mm": 25.0}
+    assert baselines._predicted_d_um(good, 145.0) == pytest.approx(200.0 * 2**0.5)
+
+
+def test_scripted_survives_waist_at_stage_start() -> None:
+    """Reviewer case: one axis fits to a collapsed caustic (zR rounded to 0)."""
+    scenario = replace(
+        clean_scenario(),
+        beam=replace(clean_scenario().beam, z0x_m=0.0, z0y_m=0.0),
+    )
+    session = MeasurementSession(scenario)
+    result = scripted_iso(session)
+    assert result["report"]["verdict"] in VERDICTS
+
+
+def test_scout_refill_stops_when_tools_fail(monkeypatch) -> None:
+    """A tool error must not make the scout refill loop spin forever."""
+    real_measure_at = baselines.measure_at
+    calls = {"n": 0}
+
+    def flaky_measure_at(session, z_mm, exposure_ms, reason):
+        # Two scouts work; every other position (later scouts and all refill
+        # candidates) fails, which used to make the refill loop spin.
+        calls["n"] += 1
+        if z_mm not in (31.25, 93.75):
+            return {"error": "stage stuck"}
+        return real_measure_at(session, z_mm, exposure_ms, reason)
+
+    monkeypatch.setattr(baselines, "measure_at", flaky_measure_at)
+    session = MeasurementSession(clean_scenario())
+    result = scripted_iso(session)
+    assert calls["n"] < 50
+    assert result["report"]["verdict"] in VERDICTS
 
 
 def test_baselines_use_only_the_public_tools() -> None:

@@ -103,7 +103,8 @@ def naive_uniform(
         )
         if "measurement_id" not in result:
             continue
-        status = "reject" if result["flags"]["saturated"] else "accept"
+        no_widths = result["d_x_um"]["mean"] is None or result["d_y_um"]["mean"] is None
+        status = "reject" if result["flags"]["saturated"] or no_widths else "accept"
         set_status(
             session,
             result["measurement_id"],
@@ -186,6 +187,7 @@ class _ScriptedOperator:
         """
         z_min, z_max = self.setup["stage_range_mm"]
         too_large: list[float] = []
+        tried: list[float] = []  # refill candidates, each tried once
         for z_mm in [z_min + f * (z_max - z_min) for f in SCOUT_FRACTIONS]:
             if self._beyond_too_large(z_mm, too_large):
                 continue
@@ -208,11 +210,12 @@ class _ScriptedOperator:
             free = [
                 z
                 for z in candidates
-                if all(abs(z - m) >= 1.0 for m in self.measured_z)
+                if all(abs(z - m) >= 1.0 for m in self.measured_z + tried)
                 and not self._beyond_too_large(z, too_large)
             ]
             if not free:
                 break
+            tried.append(free[0])
             result = self.measure(
                 free[0], "Scripted: refill a scout near the smallest beam."
             )
@@ -333,9 +336,10 @@ class _ScriptedOperator:
         return d_x * d_y
 
     def _fits_sensor(self, z_mm: float, evaluation: dict[str, Any]) -> bool:
+        """False if an axis with a usable fit predicts d above half the sensor."""
         for axis in ("x", "y"):
             d_um = _predicted_d_um(evaluation[axis], z_mm)
-            if d_um is None or d_um / 1e3 > MAX_D_PER_SENSOR * self.sensor_mm:
+            if d_um is not None and d_um / 1e3 > MAX_D_PER_SENSOR * self.sensor_mm:
                 return False
         return True
 
@@ -355,7 +359,11 @@ class _ScriptedOperator:
 
 def _predicted_d_um(axis: dict[str, Any], z_mm: float) -> float | None:
     """Predicted diameter in um from a fitted axis, or None without a fit."""
-    if not axis["fit_success"] or axis["d0_um"] is None or axis["z_r_mm"] is None:
+    # A collapsed fit (d0 or zR rounded to 0, e.g. far-field data only) predicts
+    # nothing; treat it like no fit at all.
+    if not axis["fit_success"] or not axis["d0_um"] or not axis["z_r_mm"]:
+        return None
+    if axis["z_r_mm"] <= 0:
         return None
     return axis["d0_um"] * float(np.hypot(1.0, (z_mm - axis["z0_mm"]) / axis["z_r_mm"]))
 
