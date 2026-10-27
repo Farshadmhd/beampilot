@@ -149,6 +149,20 @@ def test_schedule_does_not_undo_an_operator_fault() -> None:
     assert [e["source"] for e in session.fault_events] == ["schedule", "operator"]
 
 
+def test_ghost_scenarios_put_the_ghost_where_promised() -> None:
+    everywhere = MeasurementSession(SCENARIOS["ghost_everywhere"]())
+    in_range = MeasurementSession(SCENARIOS["ghost_in_range"]())
+    assert "everywhere" in reveal_truth(everywhere)["ghost"]
+    assert "150-200 mm" in reveal_truth(in_range)["ghost"]
+    record = session_record(everywhere)
+    json.dumps(record, allow_nan=False)  # an unlimited window is stored as null
+    assert record["scenario_params"]["ghost"]["z_min_m"] is None
+    # The ghost changes the frame only inside its z window.
+    ghost = in_range.scenario.ghost
+    assert ghost.present_at(0.175) and not ghost.present_at(0.120)
+    assert reveal_truth(MeasurementSession(clean_scenario())).get("ghost") is None
+
+
 def test_session_record_holds_what_replay_needs() -> None:
     session = MeasurementSession(clean_scenario())
     record = session_record(session)

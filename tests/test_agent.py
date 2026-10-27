@@ -409,6 +409,27 @@ def test_should_stop_cancels_before_the_next_model_call() -> None:
     assert run.report["stopped_by_limit"] == "cancelled by the controller"
 
 
+def test_view_frame_image_reaches_the_model_but_not_the_log() -> None:
+    client = FakeClient(
+        [
+            _response(_call("measure_at", z_mm=120.0, exposure_ms=1.5)),
+            _response(_call("view_frame", measurement_id="m1")),
+            _response(_call("finish", verdict="measurement_failed", explanation="x")),
+        ]
+    )
+    session = _session()
+    run = run_agent(session, client)
+    output = _outputs(client.requests[2])[-1]["output"]
+    assert isinstance(output, list)
+    text, image = output
+    assert json.loads(text["text"])["image_id"] == "view1-m1"
+    assert image["type"] == "input_image"
+    assert image["image_url"].startswith("data:image/png;base64,")
+    assert session.images == {}  # handed over once, not kept
+    logged = json.dumps(run.to_dict()) + json.dumps(session.log)
+    assert "base64" not in logged
+
+
 def test_requests_never_contain_the_hidden_truth() -> None:
     client = FakeClient(
         [
@@ -449,6 +470,7 @@ def test_tool_definitions_are_strict_with_a_required_reason() -> None:
         "get_setup",
         "measure_at",
         "retake_darks",
+        "view_frame",
         "set_status",
         "evaluate",
         "finish",
@@ -476,5 +498,5 @@ def test_cost_uses_cached_and_contributor_prices() -> None:
 def test_system_prompt_is_short_and_complete() -> None:
     prompt = system_prompt()
     assert len(prompt.split()) < 1500
-    for word in ("ISO 11146-1", "reason", "retake_darks", *VERDICTS):
+    for word in ("ISO 11146-1", "reason", "retake_darks", "view_frame", *VERDICTS):
         assert word in prompt

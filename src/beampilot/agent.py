@@ -97,6 +97,16 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         "properties": {"reason": _REASON},
     },
     {
+        "name": "view_frame",
+        "description": "Optional: look at one camera frame of a measurement as an "
+        "image (square-root brightness scale). Use it when numbers look odd or "
+        "flags are ambiguous. Small separate budget (views_left), no position cost.",
+        "properties": {
+            "measurement_id": {"type": "string", "description": "e.g. m3"},
+            "reason": _REASON,
+        },
+    },
+    {
         "name": "set_status",
         "description": "Accept or reject a pending measurement. Only accepted "
         "measurements enter the fit. Saturated measurements cannot be accepted.",
@@ -148,6 +158,7 @@ TOOL_FUNCTIONS: dict[str, Callable[..., dict[str, Any]]] = {
     "get_setup": tools.get_setup,
     "measure_at": tools.measure_at,
     "retake_darks": tools.retake_darks,
+    "view_frame": tools.view_frame,
     "set_status": tools.set_status,
     "evaluate": tools.evaluate,
     "finish": tools.finish,
@@ -382,13 +393,7 @@ def run_agent(
             step["tool_calls"].append(entry)
             if on_tool_call is not None:
                 on_tool_call(entry)
-            outputs.append(
-                {
-                    "type": "function_call_output",
-                    "call_id": item.call_id,
-                    "output": json.dumps(result, ensure_ascii=False),
-                }
-            )
+            outputs.append(_call_output(session, item.call_id, result))
         run.steps.append(step)
         if on_step is not None:
             on_step(step)
@@ -494,6 +499,26 @@ def _replay_items(output: list[Any]) -> list[dict[str, Any]]:
             }
         )
     return items
+
+
+def _call_output(
+    session: MeasurementSession, call_id: str, result: dict[str, Any]
+) -> dict[str, Any]:
+    """``function_call_output`` for a tool result; attaches a view_frame image.
+
+    The image (PNG data URL) is taken out of the session by its ``image_id``,
+    so it reaches the model once and never the logs or run files. Images in a
+    tool output were verified to reach the model (scripts/smoke_test_image.py).
+    """
+    text = json.dumps(result, ensure_ascii=False)
+    image = session.images.pop(result.get("image_id", ""), None)
+    output: str | list[dict[str, Any]] = text
+    if image is not None:
+        output = [
+            {"type": "input_text", "text": text},
+            {"type": "input_image", "image_url": image},
+        ]
+    return {"type": "function_call_output", "call_id": call_id, "output": output}
 
 
 def _execute(session: MeasurementSession, item: Any) -> tuple[dict, dict]:

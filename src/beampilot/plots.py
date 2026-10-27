@@ -6,6 +6,7 @@ Units as at the tool boundary: z in mm, diameters in um.
 
 from __future__ import annotations
 
+import io
 from typing import Any
 
 import matplotlib
@@ -99,6 +100,37 @@ def caustic_figure(
     fig.tight_layout()
     plt.close(fig)  # the caller (Gradio) renders it; free pyplot's reference
     return fig
+
+
+def frame_png(
+    frame: NDArray[Any], full_scale: int, offset_counts: float = 0.0
+) -> bytes:
+    """Camera frame as a PNG on a square-root brightness scale.
+
+    The square root lifts faint structure (a weak second spot, a background
+    change) that a linear scale next to a bright peak would hide. Black is the
+    dark level (`offset_counts`), white-yellow is full scale.
+
+    Parameters
+    ----------
+    frame : 2D array
+        Raw frame in counts.
+    full_scale : int
+        ADC full scale in counts.
+    offset_counts : float, optional
+        Dark level in counts, shown as black. Default 0.
+
+    Returns
+    -------
+    bytes
+        PNG file contents (same size as the frame).
+    """
+    span = max(float(full_scale) - offset_counts, 1.0)
+    scaled = np.clip((np.asarray(frame, dtype=np.float64) - offset_counts) / span, 0, 1)
+    rgba = plt.get_cmap("inferno")(np.sqrt(scaled))
+    buffer = io.BytesIO()
+    plt.imsave(buffer, rgba[..., :3], format="png")
+    return buffer.getvalue()
 
 
 def frame_image(frame: NDArray[Any], full_scale: int) -> NDArray[np.uint8]:

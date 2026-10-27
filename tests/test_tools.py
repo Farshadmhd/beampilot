@@ -1,9 +1,12 @@
 """Tests for the agent tool layer on simulated scenarios."""
 
+import base64
 import inspect
+import io
 import json
 from dataclasses import replace
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 
@@ -27,6 +30,7 @@ from beampilot.tools import (
     measure_at,
     retake_darks,
     set_status,
+    view_frame,
 )
 from beampilot.widths import Roi, WidthResult
 
@@ -725,3 +729,28 @@ def test_tools_never_touch_the_hidden_truth() -> None:
     source = inspect.getsource(tools)
     assert "reveal_truth" not in source
     assert ".beam" not in source
+
+
+# view_frame
+
+
+def test_view_frame_returns_a_png_and_keeps_a_budget() -> None:
+    session = MeasurementSession(clean_scenario())
+    measure_at(session, 120.0, 1.5, REASON)
+    for n in range(1, 5):
+        result = view_frame(session, "m1", "look")
+        _assert_json(result)
+        assert result["views_left"] == 4 - n
+        assert "base64" not in json.dumps(result)  # image travels separately
+        url = session.images.pop(result["image_id"])
+        png = base64.b64decode(url.split(",", 1)[1])
+        image = plt.imread(io.BytesIO(png))
+        assert image.shape[:2] == (512, 512)
+    assert "view budget used up" in view_frame(session, "m1", "again")["error"]
+    assert session.positions_left == 19  # views cost no positions
+
+
+def test_view_frame_errors() -> None:
+    session = MeasurementSession(clean_scenario())
+    assert "none yet" in view_frame(session, "m1", REASON)["error"]
+    assert get_setup(session, REASON)["views_left"] == 4
