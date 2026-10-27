@@ -20,6 +20,7 @@ from beampilot.session import (
 )
 from beampilot.simulator import beam_diameter, rayleigh_length
 from beampilot.tools import evaluate, finish, get_setup, measure_at, set_status
+from beampilot.widths import Roi, WidthResult
 
 REASON = "test"
 # Offsets from the waist in units of the x Rayleigh length: 5 near, 5 far.
@@ -166,6 +167,49 @@ def test_too_few_pixels_flag() -> None:
     assert result["suggested_verdict"] == "reject"
 
 
+def test_no_usable_signal_flags_not_converged_and_cannot_be_accepted() -> None:
+    session = MeasurementSession(clean_scenario())
+    result = measure_at(session, 120.0, 0.01, REASON)  # peak ~ 20 counts
+    _assert_json(result)
+    assert result["flags"]["not_converged"]
+    assert result["flags"]["low_signal"]
+    assert result["suggested_verdict"] == "reject"
+    refused = set_status(session, "m1", "accept", REASON)
+    assert "no valid widths" in refused["error"]
+
+
+def _width(azimuth_deg: float, ellipticity: float) -> WidthResult:
+    return WidthResult(
+        d_x_m=1e-3,
+        d_y_m=1e-3,
+        x_c_m=0.0,
+        y_c_m=0.0,
+        azimuth_rad=np.radians(azimuth_deg),
+        ellipticity=ellipticity,
+        iterations=3,
+        converged=True,
+        roi=Roi(0, 10, 0, 10),
+        roi_sum_counts=1.0,
+        roi_clipped=False,
+    )
+
+
+@pytest.mark.parametrize(
+    ("frames", "expected_deg"),
+    [
+        ([(45.0, 0.5)], 45.0),
+        ([(89.0, 0.5)], 1.0),  # 89 deg is 1 deg from the y axis
+        ([(-30.0, 0.5)], 30.0),
+        ([(0.0, 0.5), (90.0, 0.5), (5.0, 0.5)], 0.0),  # median
+        ([(45.0, 0.95)], 0.0),  # circular frames are ignored
+    ],
+)
+def test_misalignment_folds_azimuth_modulo_90(frames, expected_deg) -> None:
+    widths = [_width(azimuth, ellipticity) for azimuth, ellipticity in frames]
+    misalignment = tools._median_misalignment_deg(widths)
+    assert misalignment == pytest.approx(expected_deg, abs=1e-9)
+
+
 # set_status
 
 
@@ -251,6 +295,15 @@ def test_evaluate_needs_four_accepted_positions() -> None:
     assert "at least 4" in result["message"]
     assert result["accepted_positions"] == 3
     assert len(result["table"]) == 4
+
+
+def test_repeats_at_one_z_count_as_one_position() -> None:
+    session = MeasurementSession(clean_scenario())
+    _measure_and_accept(session, [100.0, 100.0, 120.0, 120.0, 140.0, 160.0])
+    result = evaluate(session, REASON)
+    assert result["status"] == "ok"
+    assert result["accepted_positions"] == 4
+    assert len(result["table"]) == 6
 
 
 def test_clean_run_iso_compliant_report() -> None:
