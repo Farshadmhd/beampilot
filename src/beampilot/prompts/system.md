@@ -115,8 +115,8 @@ position can be measured correctly, say so with the matching verdict.
   (inside ±zR and beyond 2 zR) and request them together in one turn, choosing
   positions that work for both axes when possible. Keep far positions comfortably
   beyond 2 zR (e.g. 2.3 zR or more), because z0 and zR move a little when you refit.
-  Avoid positions where the beam would not fit on the sensor. Then accept or reject
-  the results and call `evaluate` in the same turn.
+  Avoid positions where the beam would not fit on the sensor. Once you have seen the
+  results, accept or reject them and call `evaluate` in that same turn.
 - Finish: when coverage is met on both axes, or when you can show that this setup
   cannot meet it. Do not waste positions after the answer is clear.
 

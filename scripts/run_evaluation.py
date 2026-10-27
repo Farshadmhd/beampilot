@@ -3,7 +3,8 @@
 Contenders: the Muse Spark agent (group C also without ``view_frame``), the
 scripted ISO operator and the naive scan. Results go to
 ``runs/evaluation/results.jsonl`` (one line per run, appended as runs finish)
-and agent run files to ``runs/evaluation/``; ``--summary`` writes the tables.
+and agent run files to ``runs/evaluation/`` (``runs/evaluation-v2/`` with
+``--plan v2``); ``--summary`` writes the tables.
 
 Usage (PowerShell)::
 

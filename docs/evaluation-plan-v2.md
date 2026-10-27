@@ -117,4 +117,22 @@ Agent runs: 16 (A) + 5 (B) + 2 × 5 (C) = 31.
 
 ## Deviations
 
-None yet.
+Both dated 27 Oct 2026 and committed **before any v2 run**, after the physics
+review of the v2 changes.
+
+1. **The prompt changes more than the two lines described above.** To stay under
+   1,500 words, three sentences were also shortened or dropped:
+   - the frames-per-position rule;
+   - the saturation hint;
+   - "You explain every decision briefly."
+
+   The required `reason` argument is still "one short sentence", but shorter reasons
+   could lower the keyword hits for "fault noticed" in group C, independently of
+   the two intended changes.
+2. **Wording fix: no accept before seeing a result.** The Fill step said "Then accept
+   or reject the results and call `evaluate` in the same turn". Measurement ids are
+   predictable (m1, m2, …), so this could be read as accepting a batch in the same
+   turn that measures it, without seeing the flags. It now says "Once you have seen
+   the results, accept or reject them and call `evaluate` in that same turn". The
+   v2 report counts any `set_status` that lands in the same model call as the
+   `measure_at` that created its id.
