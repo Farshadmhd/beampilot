@@ -195,9 +195,27 @@ with a report built from session state.
 
 ## 2026-10-27: Known limitation: extreme simple astigmatism
 
-The scripted baseline skips planned positions where the predicted beam (either axis)
-is wider than half the sensor (`MAX_D_PER_SENSOR = 0.5`). For x and y waists far
-apart (e.g. 20 mm and 230 mm, 8.5 zR), the near points of one axis are blocked by the
-size of the other axis there, although such frames are only `roi_clipped` and could
-be accepted; the run ends `estimate_not_compliant` with budget left. A per-axis
-check against the clipping-loss estimate would fix it; left as is for now.
+The scripted baseline skips grid positions where the predicted beam (either axis) is
+wider than half the sensor (`MAX_D_PER_SENSOR = 0.5`), so for x and y waists far apart
+the near points of one axis can be blocked by the size of the other axis there,
+although such frames are often only `roi_clipped` and acceptable. Since the near-gap
+fill (which ignores that size check) was added, x 20 / y 230 mm is iso_compliant 10/10;
+but x 5 / y 245 mm still ends `estimate_not_compliant` with budget left (the gap fill
+is blocked by the minimum spacing). Conversely the gap fill could plan positions where
+the beam really overfills the sensor (not seen with the 2.8 mm sensor). A per-axis
+check against the clipping-loss estimate would fix both; left as is for now.
+
+## 2026-10-27: M² < 1 flag with a σ floor; waist_not_accessible needs the stage end
+
+The Jacobian σ(M²) misses systematic errors (one-sided data, the shared dark), so a
+true M² = 1.0 beam fitted 0.997 with a tiny σ was flagged as M² < 1 and `finish` then
+refused a correct `iso_compliant` (scripted, 1 of 10 seeds). The flag now uses
+σ floored at 1 % of M² (`M2_STD_FLOOR_REL`). This deviates from the plain
+"M² + 2σ < 1" rule asked for earlier; the maintainer should confirm.
+
+σ(z0) is just as optimistic: after far-field-only scouts a waist 2 mm inside the stage
+was reported `outside` at 10σ. So `finish` refuses `waist_not_accessible` unless an
+axis is `outside` and an accepted position lies within 5 % of the stage length
+(`STAGE_END_FRACTION`) from that stage end; the scripted operator approaches the end
+to that margin before concluding. waist_outside_range stays waist_not_accessible
+10/10 (8 positions).

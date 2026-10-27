@@ -55,7 +55,8 @@ Every tool has a required `reason` string. Tool schemas are strict, and verdicts
 4. `evaluate(reason)`
    - Weighted caustic fit **per axis**, per-axis ISO coverage in units of zR
      ("x: 3 within ±1 zR, need about 5; 1 beyond 2 zR, need about 5"),
-     waist inside stage range (yes/no), general-astigmatism check, M² < 1 sanity flag,
+     waist accessibility (inside / outside / uncertain), general-astigmatism check, M² < 1
+     sanity flag,
      and a compact table of all measurements.
    - If an axis fit fails, or no accepted position lies within ±1 zR of its fitted waist,
      d0, z0, zR and M² of that axis are reported as null with a `not_determined` reason
@@ -71,7 +72,11 @@ Every tool has a required `reason` string. Tool schemas are strict, and verdicts
    - Python builds the report numbers from stored state. The model writes only the verdict and the text.
    - Guardrail: if the model claims `iso_compliant` but `evaluate` says coverage is not met,
      or flags general astigmatism or M² < 1, the controller returns an error and the agent
-     must continue or choose another verdict.
+     must continue or choose another verdict. `waist_not_accessible` is refused unless an
+     axis is `outside` and an accepted position lies within 5 % of the stage length from
+     that stage end. A waist up to about 1 zR outside the stage may still give an accurate
+     M²; the verdict is then `waist_not_accessible` by definition (no near-waist points on
+     both sides), not because the number is unusable.
    - If a hard limit (model calls, tokens, cost) or an API error stops the agent first,
      Python writes a fallback report from session state: `estimate_not_compliant` if M²
      is determined on both axes, otherwise `measurement_failed`, with `stopped_by_limit`
