@@ -149,3 +149,21 @@ nulled until a position on its side is measured; the scripted baseline does that
 (10/10 seeds compliant for waists 10–30 mm and 235–245 mm from the stage start).
 The reviewer's alternative, null only when no accepted point lies within ~1–2 zR of
 the fitted waist, is left open for the maintainer.
+
+## 2026-10-27: Agent loop uses the stateless Responses API mode
+
+Verified in the Meta Model API docs: `instructions` is not kept across turns (resent
+every call), `max_output_tokens` caps reasoning plus visible output, tool results go
+back as `function_call_output` with the matching `call_id`, `parallel_tool_calls`
+defaults to true, `reasoning.effort` accepts minimal to xhigh (not "none"). Chaining
+turns with `previous_response_id` worked in a single run but failed in all six
+parallel runs with "400 referenced response not found or expired". The loop
+therefore uses the documented stateless mode: `store=false`,
+`include=["reasoning.encrypted_content"]`, and the full history (reasoning items,
+assistant messages, function calls and outputs) resent on every call. Prompt
+caching keeps this cheap (~90 % of input tokens cached in the real runs). Transient
+API errors (connection, timeout, rate limit, 5xx) are retried twice; any other
+error stops the run with a logged reason. Hard limits per run: 40 model calls,
+1.5 M tokens, $0.50. The first six real runs (seed 0, muse-spark-1.2, effort low)
+gave the expected verdict on every scenario with M² within 0.5 %; they used the
+prompt before the review fixes in this branch (number rule, background advice).
