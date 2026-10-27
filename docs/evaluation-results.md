@@ -10,6 +10,29 @@ stop rule was not reached.
 **Total agent cost: $2.56** ($2.05 for `agent`, $0.51 for `agent-noview`). The
 scripted and naive contenders make no API calls.
 
+**Pre-registration, all on 27 Oct 2026 and before any agent run of the evaluation**
+(the first run file is from 20:51):
+
+| Commit | Time | What |
+|---|---|---|
+| `d2f445e` | 19:03 | Plan: groups, seeds, expected verdicts, metrics, stop rule |
+| `b3025e9` | 20:21 | Deviations 1–7: C1 "seen", C1 wording, new C5, ablation, scoring, budget and order |
+| `9ca92df` | 20:33 | Deviation 8: scoring details and oracle output, plus the evaluation script |
+| `cda0f73` | 20:37 | Deviation 9: caveats from the physics review (C2–C5) |
+
+**Read the results with these limits in mind:**
+- **One run per case.** Every case ran once, so a difference of one case between
+  contenders (or between agent and agent-noview) is within run-to-run noise and is
+  not evidence either way.
+- **C1 is "seen".** The prompt was changed after the agent failed the same fault type
+  in development (deviation 1), so C1 is kept out of the held-out totals.
+- **Group B is not a fair contest.** The scripted baseline cannot read operator
+  notes, by design. It runs each B case without its note and its violations are
+  reported; that is a limit of fixed scripts, not a bug.
+- **The 40-call limit decided two cases.** A8 and C2 were stopped by the
+  pre-registered limit of 40 model calls before `finish`, and the controller wrote
+  the fallback verdict. The cause and details are below.
+
 ## Summary
 
 | Contender | A (16) | B (5) | C held out (C2–C5) | C1 (seen) | Mean positions A / B / C | Violations (B) | Cost |
@@ -33,8 +56,8 @@ scripted and naive contenders make no API calls.
   within the 3 % tolerance.
 - **Ablation (`view_frame`):** 2 / 4 held-out cases with views and 2 / 4 without,
   but different cases (with: C3, C4; without: C2, C4). On the seen case C1, only the
-  agent with views got the verdict right. With one run per case this difference is
-  not significant (plan, "Known limitations").
+  agent with views got the verdict right. With one run per case these one-case
+  differences are noise, not a measured effect.
 
 ## Every wrong verdict, with the reason
 
