@@ -9,7 +9,8 @@ values here are SI (m, rad); the tool layer converts at the boundary.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
+import threading
+from dataclasses import asdict, dataclass, field, replace
 from typing import Any
 
 import numpy as np
@@ -172,6 +173,12 @@ class MeasurementSession:
         self.report: dict[str, Any] | None = None
         self.positions_used = 0
         self.dark_sets_taken = 0
+        self.last_frame: NDArray[np.int32] | None = None
+        # Each switch of the faults, for the run file: when and what.
+        self.fault_events: list[dict[str, Any]] = []
+        self._pending_faults: dict[str, float] = {}
+        self._fault_lock = threading.Lock()
+        self._schedule_done: set[int] = set()
         self._rng = np.random.default_rng(scenario.seed)
         self.dark_mean = self._take_dark_set()
 
@@ -216,11 +223,45 @@ class MeasurementSession:
             changes["power_factor"] = power_factor
         self.faults = replace(self.faults, **changes)
 
+    def request_faults(
+        self,
+        extra_background_counts: float | None = None,
+        power_factor: float | None = None,
+    ) -> None:
+        """Queue a fault change from another thread (e.g. a demo button).
+
+        Thread-safe. The change is applied before the next ``measure_at``
+        (in :meth:`take_frames`), never in the middle of one.
+
+        Parameters
+        ----------
+        extra_background_counts : float, optional
+            New extra background in counts; None keeps the current value.
+        power_factor : float, optional
+            New beam power factor (> 0); None keeps the current value.
+
+        Raises
+        ------
+        ValueError
+            If `power_factor` is not positive.
+        """
+        if power_factor is not None and not power_factor > 0:
+            raise ValueError(f"power_factor must be > 0, got {power_factor}")
+        with self._fault_lock:
+            if extra_background_counts is not None:
+                self._pending_faults["extra_background_counts"] = (
+                    extra_background_counts
+                )
+            if power_factor is not None:
+                self._pending_faults["power_factor"] = power_factor
+
     def take_frames(self, z_m: float, exposure_ms: float) -> list[NDArray[np.int32]]:
         """Render the repeated frames at one position with the current faults.
 
-        Applies any scheduled fault first. The caller (the tool layer) must
-        have validated `z_m` and `exposure_ms`.
+        Applies any scheduled fault and any fault requested with
+        :meth:`request_faults` first, and keeps the first frame as
+        ``last_frame``. The caller (the tool layer) must have validated `z_m`
+        and `exposure_ms`.
 
         Parameters
         ----------
@@ -235,11 +276,18 @@ class MeasurementSession:
             ``scenario.repeats`` raw frames in counts.
         """
         self._apply_fault_schedule()
+        with self._fault_lock:
+            pending, self._pending_faults = self._pending_faults, {}
+        if pending:
+            self.set_faults(**pending)
+            self._record_faults("operator")
         camera = self._camera_with_faults()
-        return [
+        frames = [
             render_frame(self.scenario.beam, camera, z_m, exposure_ms, self._rng)
             for _ in range(self.scenario.repeats)
         ]
+        self.last_frame = frames[0]
+        return frames
 
     def retake_darks(self) -> None:
         """Take a fresh dark set with the current faults; costs one position.
@@ -260,10 +308,24 @@ class MeasurementSession:
         return f"m{len(self.measurements) + 1}"
 
     def _apply_fault_schedule(self) -> None:
-        """Switch to a scheduled fault once its measurement count is reached."""
-        for after_n, faults in self.scenario.fault_schedule:
-            if len(self.measurements) == after_n:
+        """Switch to a scheduled fault once its measurement count is reached.
+
+        Each entry applies once, so a later operator request is not undone.
+        """
+        for index, (after_n, faults) in enumerate(self.scenario.fault_schedule):
+            if len(self.measurements) >= after_n and index not in self._schedule_done:
+                self._schedule_done.add(index)
                 self.faults = faults
+                self._record_faults("schedule")
+
+    def _record_faults(self, source: str) -> None:
+        self.fault_events.append(
+            {
+                "before_measurement": len(self.measurements) + 1,
+                "source": source,
+                "faults": asdict(self.faults),
+            }
+        )
 
     def _take_dark_set(self) -> NDArray[np.float64]:
         # Darks taken at the switch-over must already see the new background.
@@ -408,3 +470,96 @@ SCENARIOS = {
     "waist_outside_range": waist_outside_range_scenario,
     "different_waists": different_waists_scenario,
 }
+
+# Ranges of the mystery beam. zR and M² are drawn and d0 follows from
+# zR = pi d0² / (4 M² lambda), which keeps >= 20 px across the waist
+# (d0 >= 127 um) and the ISO far field (2-3 zR) on the 250 mm stage.
+MYSTERY_WAVELENGTHS_M = (632.8e-9, 1064e-9)
+MYSTERY_ZR_RANGE_M = (0.020, 0.045)
+MYSTERY_M2_RANGE = (1.0, 2.0)
+MYSTERY_WAIST_INSIDE_PROBABILITY = 0.85
+MYSTERY_FAULT_PROBABILITY = 0.4
+
+
+def random_scenario(seed: int = 0) -> Scenario:
+    """A "mystery beam": random but physically sensible, maybe one fault.
+
+    Draws per axis M² in [1, 2] and zR in [20, 45] mm and derives the waist
+    diameter d0 = sqrt(4 M² lambda zR / pi), at 633 or 1064 nm. The x waist
+    lies inside the 0-250 mm stage with probability 0.85 (else 15-60 mm
+    before or after it); the y waist is within a few mm of it (simple
+    astigmatism). Brightness varies tenfold. With probability 0.4 there is
+    one fault: room light (+2 to 5 counts) after 3-8 measurements, or the
+    laser 3x brighter from the start.
+
+    Parameters
+    ----------
+    seed : int, optional
+        Seed for both the drawn parameters and the session noise.
+
+    Returns
+    -------
+    Scenario
+        Named ``"mystery"``.
+    """
+    rng = np.random.default_rng([seed, 2026])  # independent of the noise stream
+    wavelength = float(rng.choice(MYSTERY_WAVELENGTHS_M))
+
+    def axis(m2: float, z_r: float) -> float:
+        return float(np.sqrt(4.0 * m2 * wavelength * z_r / np.pi))
+
+    m2x = float(rng.uniform(*MYSTERY_M2_RANGE))
+    m2y = float(np.clip(m2x * rng.uniform(0.9, 1.15), 1.0, 2.2))
+    z_rx = float(rng.uniform(*MYSTERY_ZR_RANGE_M))
+    z_ry = float(np.clip(z_rx * rng.uniform(0.85, 1.15), *MYSTERY_ZR_RANGE_M))
+    if rng.random() < MYSTERY_WAIST_INSIDE_PROBABILITY:
+        z0x = float(rng.uniform(0.040, 0.210))
+    else:
+        z0x = float(rng.choice([-1.0, 1.0]) * rng.uniform(0.015, 0.060))
+        z0x = z0x if z0x < 0 else 0.250 + z0x
+    z0y = z0x + float(rng.normal(0.0, 0.008))
+    beam = BeamParams(wavelength, axis(m2x, z_rx), axis(m2y, z_ry), z0x, z0y, m2x, m2y)
+    camera = replace(_camera(), signal_counts_per_ms=float(10 ** rng.uniform(5.5, 6.5)))
+
+    settings: dict[str, Any] = {"beam": beam, "camera": camera}
+    if rng.random() < MYSTERY_FAULT_PROBABILITY:
+        if rng.random() < 0.5:
+            room_light = Faults(extra_background_counts=float(rng.uniform(2.0, 5.0)))
+            settings["fault_schedule"] = ((int(rng.integers(3, 9)), room_light),)
+        else:
+            settings["faults"] = Faults(power_factor=3.0)
+    return _scenario("mystery", seed, **settings)
+
+
+def session_record(session: MeasurementSession) -> dict[str, Any]:
+    """What a run file keeps besides the agent's steps (for replay and review).
+
+    Parameters
+    ----------
+    session : MeasurementSession
+        The finished (or stopped) session.
+
+    Returns
+    -------
+    dict
+        Positions used, revealed truth, scenario parameters (beam and camera
+        in SI, stage range), fault events and the tool log.
+    """
+    scenario = session.scenario
+    return {
+        "positions_used": session.positions_used,
+        "truth": reveal_truth(session),
+        "scenario_params": {
+            "beam": asdict(scenario.beam),
+            "camera": asdict(scenario.camera),
+            "stage_min_m": scenario.stage_min_m,
+            "stage_max_m": scenario.stage_max_m,
+            "faults": asdict(scenario.faults),
+            "fault_schedule": [
+                {"after_measurements": n, "faults": asdict(f)}
+                for n, f in scenario.fault_schedule
+            ],
+        },
+        "fault_events": session.fault_events,
+        "tool_log": session.log,
+    }
