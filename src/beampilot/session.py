@@ -17,9 +17,11 @@ import numpy as np
 from numpy.typing import NDArray
 
 from beampilot.simulator import (
+    Aperture,
     BeamParams,
     CameraConfig,
     Ghost,
+    HotPixels,
     dark_frame,
     rayleigh_length,
     render_frame,
@@ -87,6 +89,13 @@ class Scenario:
         is present. Default None.
     max_views : int, optional
         Budget of ``view_frame`` calls (separate from positions). Default 4.
+    aperture : Aperture, optional
+        Hidden iris that truncates the beam over a z range. Default None.
+    hot_pixels : HotPixels, optional
+        Defective pixels in every light frame (not in darks). Default None.
+    drift_x_per_measurement_m : float, optional
+        Slow pointing drift: the beam centre moves along x by this many m per
+        measurement taken so far (the first measurement is at 0). Default 0.
 
     Raises
     ------
@@ -110,6 +119,9 @@ class Scenario:
     max_exposure_ms: float = 200.0
     ghost: Ghost | None = None
     max_views: int = 4
+    aperture: Aperture | None = None
+    hot_pixels: HotPixels | None = None
+    drift_x_per_measurement_m: float = 0.0
 
     def __post_init__(self) -> None:
         if not self.stage_max_m > self.stage_min_m:
@@ -120,6 +132,8 @@ class Scenario:
             raise ValueError("max_views must be >= 0")
         if not 0 < self.min_exposure_ms < self.max_exposure_ms:
             raise ValueError("need 0 < min_exposure_ms < max_exposure_ms")
+        if not np.isfinite(self.drift_x_per_measurement_m):
+            raise ValueError("drift_x_per_measurement_m must be finite")
 
 
 @dataclass
@@ -305,6 +319,7 @@ class MeasurementSession:
             self.set_faults(**pending)
             self._record_faults("operator")
         camera = self._camera_with_faults()
+        x0_m = self.scenario.drift_x_per_measurement_m * len(self.measurements)
         frames = [
             render_frame(
                 self.scenario.beam,
@@ -312,7 +327,10 @@ class MeasurementSession:
                 z_m,
                 exposure_ms,
                 self._rng,
+                x0_m=x0_m,
                 ghost=self.scenario.ghost,
+                aperture=self.scenario.aperture,
+                hot_pixels=self.scenario.hot_pixels,
             )
             for _ in range(self.scenario.repeats)
         ]
@@ -413,6 +431,21 @@ def reveal_truth(session: MeasurementSession) -> dict[str, float | str]:
             f"{ghost.relative_power:.0%} power at ({ghost.offset_x_m * 1e3:+.2f}, "
             f"{ghost.offset_y_m * 1e3:+.2f}) mm from the beam, {window}"
         )
+    aperture = session.scenario.aperture
+    if aperture is not None:
+        truth["aperture"] = (
+            f"iris of {aperture.radius_m * 1e3:g} mm radius for "
+            f"{aperture.z_min_m * 1e3:g}-{aperture.z_max_m * 1e3:g} mm"
+        )
+    hot = session.scenario.hot_pixels
+    if hot is not None:
+        truth["hot_pixels"] = (
+            f"{len(hot.pixels)} pixels (row, column) {list(hot.pixels)} with "
+            f"+{hot.extra_counts:g} counts in light frames"
+        )
+    drift = session.scenario.drift_x_per_measurement_m
+    if drift:
+        truth["drift"] = f"beam centre x moves {drift * 1e6:+g} um per measurement"
     return truth
 
 
@@ -635,6 +668,13 @@ def session_record(session: MeasurementSession) -> dict[str, Any]:
             "stage_max_m": scenario.stage_max_m,
             # asdict keeps +-inf for an unlimited z window; JSON needs null.
             "ghost": _ghost_record(scenario.ghost),
+            "aperture": None
+            if scenario.aperture is None
+            else asdict(scenario.aperture),
+            "hot_pixels": (
+                None if scenario.hot_pixels is None else asdict(scenario.hot_pixels)
+            ),
+            "drift_x_per_measurement_m": scenario.drift_x_per_measurement_m,
             "faults": asdict(scenario.faults),
             "fault_schedule": [
                 {"after_measurements": n, "faults": asdict(f)}

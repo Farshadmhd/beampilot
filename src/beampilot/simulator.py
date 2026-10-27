@@ -168,6 +168,89 @@ class Ghost:
         )
 
 
+@dataclass(frozen=True)
+class Aperture:
+    """A circular aperture (iris) in front of the sensor over a z range.
+
+    Light outside the radius is blocked: the profile is truncated, not
+    rescaled. Diffraction at the edge is ignored. The aperture is fixed in
+    the lab, centred at (`center_x_m`, `center_y_m`) relative to the sensor
+    centre, and blocks the ghost too.
+
+    Parameters
+    ----------
+    radius_m : float
+        Aperture radius in m (> 0).
+    z_min_m, z_max_m : float
+        The aperture is in the beam only for z_min <= z <= z_max, in m.
+    center_x_m, center_y_m : float, optional
+        Aperture centre relative to the sensor centre in m. Default 0.
+
+    Raises
+    ------
+    ValueError
+        If the radius is not positive, the z window is empty or a centre is
+        not finite.
+    """
+
+    radius_m: float
+    z_min_m: float
+    z_max_m: float
+    center_x_m: float = 0.0
+    center_y_m: float = 0.0
+
+    def __post_init__(self) -> None:
+        if not self.radius_m > 0:
+            raise ValueError(f"radius_m must be > 0, got {self.radius_m}")
+        if not self.z_max_m >= self.z_min_m:
+            raise ValueError("z_max_m must be >= z_min_m")
+        for name in ("center_x_m", "center_y_m"):
+            if not np.isfinite(getattr(self, name)):
+                raise ValueError(f"{name} must be finite, got {getattr(self, name)}")
+
+    def present_at(self, z_m: float) -> bool:
+        """True if the aperture is in the beam at stage position `z_m` (m)."""
+        return bool(self.z_min_m <= z_m <= self.z_max_m)
+
+    def mask(self, camera: CameraConfig) -> NDArray[np.float64]:
+        """Transmission per pixel (1 inside the radius, 0 outside)."""
+        x_m, y_m = _pixel_coordinates(camera)
+        r2 = (x_m[np.newaxis, :] - self.center_x_m) ** 2 + (
+            y_m[:, np.newaxis] - self.center_y_m
+        ) ** 2
+        return (r2 <= self.radius_m**2).astype(np.float64)
+
+
+@dataclass(frozen=True)
+class HotPixels:
+    """Defective pixels with a constant extra signal in every light frame.
+
+    The extra counts are added to light frames only, not to dark frames, as
+    for a defect that appears after the darks were taken. No shot noise.
+
+    Parameters
+    ----------
+    pixels : tuple of (int, int)
+        ``(row, column)`` indices of the defective pixels.
+    extra_counts : float
+        Extra signal per defective pixel in counts (> 0).
+
+    Raises
+    ------
+    ValueError
+        If `extra_counts` is not positive or no pixel is given.
+    """
+
+    pixels: tuple[tuple[int, int], ...]
+    extra_counts: float
+
+    def __post_init__(self) -> None:
+        if not self.pixels:
+            raise ValueError("pixels must not be empty")
+        if not self.extra_counts > 0:
+            raise ValueError(f"extra_counts must be > 0, got {self.extra_counts}")
+
+
 def rayleigh_length(d0_m: float, m2: float, wavelength_m: float) -> float:
     """Rayleigh length zR = pi * d0**2 / (4 * M² * wavelength).
 
@@ -228,6 +311,8 @@ def render_frame(
     x0_m: float = 0.0,
     y0_m: float = 0.0,
     ghost: Ghost | None = None,
+    aperture: Aperture | None = None,
+    hot_pixels: HotPixels | None = None,
 ) -> NDArray[np.int32]:
     """Render one camera frame of the beam.
 
@@ -235,7 +320,9 @@ def render_frame(
     value is highest near the waist and saturation happens there first. Parts
     of the beam outside the sensor are truncated, not rescaled, so the frame
     sum drops when the beam outgrows the sensor (ISO clipping loss). An
-    optional ghost adds a second, weaker spot (see :class:`Ghost`).
+    optional ghost adds a second, weaker spot (see :class:`Ghost`), an
+    optional aperture truncates the light (see :class:`Aperture`), and
+    optional hot pixels add a constant signal (see :class:`HotPixels`).
 
     Parameters
     ----------
@@ -255,6 +342,10 @@ def render_frame(
         indices. Default 0.0 (centred).
     ghost : Ghost, optional
         Second, weaker spot (e.g. a reflection). Default None.
+    aperture : Aperture, optional
+        Iris that blocks light outside its radius where present. Default None.
+    hot_pixels : HotPixels, optional
+        Defective pixels with extra counts. Default None.
 
     Returns
     -------
@@ -283,8 +374,13 @@ def render_frame(
             x0_m + offset_x,
             y0_m + offset_y,
         )
+    if aperture is not None and aperture.present_at(z_m):
+        signal_counts *= aperture.mask(camera)
     if camera.shot_noise:
         signal_counts = rng.poisson(signal_counts).astype(np.float64)
+    if hot_pixels is not None:
+        for row, column in hot_pixels.pixels:
+            signal_counts[row, column] += hot_pixels.extra_counts
     return _digitise(signal_counts, camera, rng)
 
 
@@ -303,8 +399,9 @@ def _gaussian_spot(
     """
     sigma_x, sigma_y = d_x_m / 4.0, d_y_m / 4.0
     # Pixel-centre coordinates relative to the spot centre.
-    x_m = (np.arange(camera.nx) - (camera.nx - 1) / 2.0) * camera.pixel_size_m - x0_m
-    y_m = (np.arange(camera.ny) - (camera.ny - 1) / 2.0) * camera.pixel_size_m - y0_m
+    x_m, y_m = _pixel_coordinates(camera)
+    x_m = x_m - x0_m
+    y_m = y_m - y0_m
     peak_counts = (
         total_counts * camera.pixel_size_m**2 / (2.0 * np.pi * sigma_x * sigma_y)
     )
@@ -313,6 +410,15 @@ def _gaussian_spot(
         - 0.5 * (y_m[:, np.newaxis] / sigma_y) ** 2
     )
     return peak_counts * profile
+
+
+def _pixel_coordinates(
+    camera: CameraConfig,
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    """Pixel-centre x (columns) and y (rows) relative to the sensor centre, in m."""
+    x_m = (np.arange(camera.nx) - (camera.nx - 1) / 2.0) * camera.pixel_size_m
+    y_m = (np.arange(camera.ny) - (camera.ny - 1) / 2.0) * camera.pixel_size_m
+    return x_m, y_m
 
 
 def dark_frame(camera: CameraConfig, rng: np.random.Generator) -> NDArray[np.int32]:

@@ -6,9 +6,11 @@ import numpy as np
 import pytest
 
 from beampilot.simulator import (
+    Aperture,
     BeamParams,
     CameraConfig,
     Ghost,
+    HotPixels,
     beam_diameter,
     dark_frame,
     rayleigh_length,
@@ -271,3 +273,87 @@ def test_ghost_rejects_bad_parameters(kwargs) -> None:
     kwargs = {"offset_x_m": 0.0, "offset_y_m": 0.0, **kwargs}
     with pytest.raises(ValueError):
         Ghost(**kwargs)
+
+
+# Aperture (iris) and hot pixels
+
+
+def test_aperture_moments_match_a_truncated_gaussian() -> None:
+    """Circular Gaussian I ~ exp(-2 r²/w²) cut at radius a, with A = 2a²/w²:
+    sigma_x² = (w²/4) (1 - A e^-A / (1 - e^-A)), and the power drops to
+    1 - e^-A of the full beam."""
+    w = 0.4e-3  # 1/e² radius at this z (d = 2w), 3.5 w to the sensor edge
+    round_beam = BeamParams(1064e-9, 2 * w, 2 * w, 0.1, 0.1, 1.0, 1.0)
+    a = 0.4e-3
+    big_a = 2 * a**2 / w**2
+    full = Roi(0, NOISELESS.nx, 0, NOISELESS.ny)
+
+    def moments(aperture):
+        frame = render_frame(
+            round_beam,
+            NOISELESS,
+            0.1,
+            10.0,
+            np.random.default_rng(0),
+            aperture=aperture,
+        ).astype(np.float64)
+        return second_moments(frame, NOISELESS.pixel_size_m, full)
+
+    clean = moments(None)
+    cut = moments(Aperture(radius_m=a, z_min_m=0.0, z_max_m=0.2))
+    expected = (w**2 / 4) * (1 - big_a * np.exp(-big_a) / (1 - np.exp(-big_a)))
+    # Integer rounding of the faint tails lowers the full-beam moment ~0.2 %.
+    assert clean.var_x_m2 == pytest.approx(w**2 / 4, rel=5e-3)
+    assert cut.var_x_m2 == pytest.approx(expected, rel=5e-3)
+    assert cut.var_y_m2 == pytest.approx(expected, rel=5e-3)
+    assert cut.total_counts == pytest.approx(
+        clean.total_counts * (1 - np.exp(-big_a)), rel=2e-3
+    )
+
+
+def test_aperture_makes_iso_widths_smaller_only_inside_its_range() -> None:
+    pixel = NOISELESS.pixel_size_m
+    iris = Aperture(radius_m=0.4e-3, z_min_m=0.20, z_max_m=0.30)
+    clean = measure_widths(_frame(), pixel)
+    clipped = measure_widths(
+        render_frame(
+            BEAM, NOISELESS, GHOST_Z_M, 10.0, np.random.default_rng(0), aperture=iris
+        ).astype(np.float64),
+        pixel,
+    )
+    assert clipped.d_x_m < 0.9 * clean.d_x_m
+    assert clipped.d_y_m < 0.9 * clean.d_y_m
+    outside = render_frame(
+        BEAM, NOISELESS, 0.15, 10.0, np.random.default_rng(0), aperture=iris
+    )
+    assert np.array_equal(outside, _frame(None, z_m=0.15).astype(np.int32))
+
+
+def test_hot_pixels_add_counts_to_light_frames_only() -> None:
+    hot = HotPixels(pixels=((40, 470), (41, 471)), extra_counts=2500.0)
+    frame = render_frame(
+        BEAM, NOISELESS, GHOST_Z_M, 10.0, np.random.default_rng(0), hot_pixels=hot
+    ).astype(np.float64)
+    difference = frame - _frame()
+    assert difference[40, 470] == pytest.approx(2500.0, abs=1)
+    assert difference[41, 471] == pytest.approx(2500.0, abs=1)
+    difference[40, 470] = difference[41, 471] = 0.0
+    assert not difference.any()
+
+
+@pytest.mark.parametrize(
+    ("factory", "kwargs"),
+    [
+        (Aperture, {"radius_m": 0.0, "z_min_m": 0.0, "z_max_m": 1.0}),
+        (Aperture, {"radius_m": 1e-3, "z_min_m": 0.2, "z_max_m": 0.1}),
+        (
+            Aperture,
+            {"radius_m": 1e-3, "z_min_m": 0, "z_max_m": 1, "center_x_m": np.nan},
+        ),
+        (HotPixels, {"pixels": (), "extra_counts": 10.0}),
+        (HotPixels, {"pixels": ((1, 1),), "extra_counts": 0.0}),
+    ],
+)
+def test_aperture_and_hot_pixels_reject_bad_parameters(factory, kwargs) -> None:
+    with pytest.raises(ValueError):
+        factory(**kwargs)
