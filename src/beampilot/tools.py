@@ -34,7 +34,9 @@ from beampilot.widths import (
 # Quality-flag thresholds.
 LOW_SIGNAL_COUNTS = 500.0  # background-subtracted peak in counts
 MIN_PIXELS_ACROSS = 20  # ISO 11146-1: at least 20 px across the beam width
-BACKGROUND_SIGMA_LIMIT = 4.0  # |residual offset| / std error (ISO/TR 11146-3)
+# |residual offset| / std error. A plain statistical test; that ISO/TR 11146-3
+# prescribes 4 sigma is unverified: check the standard text.
+BACKGROUND_SIGMA_LIMIT = 4.0
 ALIGNMENT_LIMIT_DEG = 10.0  # principal axes vs lab x/y
 MAX_CLIPPING_LOSS = 0.01  # ISO 11146-1: power outside the sensor below 1 %
 CIRCULAR_THRESHOLD = 0.87  # ellipticity above this: circular (unverified, ISO)
@@ -184,7 +186,8 @@ def measure_at(
       inflate the offset.
     - ``background_changed``: in some frame without beam in the corners,
       |residual offset| exceeds 4 times its standard error, i.e. the
-      background is no longer the one in the dark frames.
+      background is no longer the one in the dark frames. The 4 sigma limit
+      is a statistical choice; that ISO/TR 11146-3 asks for it is unverified.
     - ``axes_not_aligned``: for the non-circular frames (ellipticity <= 0.87),
       the median azimuth deviates from the x/y axes by more than 10 degrees
       (azimuth taken modulo 90 degrees).
