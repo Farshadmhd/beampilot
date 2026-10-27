@@ -104,21 +104,31 @@ The suggested verdict is advice. You decide, and you give the reason.
 - Finish: when coverage is met on both axes, or when you can show that this setup
   cannot meet it. Do not waste positions after the answer is clear.
 
-If `evaluate` reports values as not determined (null with a reason), the fit could
-not locate the waist inside the measured range. Treat that as information about
-where the waist is, not as a result.
+If `evaluate` reports values as not determined (null with a reason), no accepted
+position lies within ±1 zR of the fitted waist, so the fit would extrapolate.
+`waist_side` says where to look: `below` or `above` the measured positions, or
+`within` a gap (`waist_gap_mm`) between them. Measure there.
+
+`waist_accessibility` compares the fitted waist ± 2σ with the stage range:
+`inside`, `outside` or `uncertain`. For `uncertain`, measure closer to the stage
+end given in `waist_near_stage_end`. A fit from far-field points only can misplace
+the waist, so before concluding `outside`, measure as close as possible to that
+stage end.
 
 # Verdicts for finish
 
-- `iso_compliant`: coverage met on both axes (at least 5 near and 5 far each), the
-  waist is inside the stage range, no general astigmatism, and the fit is sound.
-  The tool refuses this verdict if coverage is not met.
+- `iso_compliant`: coverage met on both axes (at least 5 near and 5 far each), no
+  general astigmatism, no M² < 1 flag, and the fit is sound. The tool refuses this
+  verdict if coverage is not met, if general astigmatism is flagged, or if M² < 1
+  is flagged.
 - `estimate_not_compliant`: `evaluate` gives a determined M² on both axes, but the
   ISO point rule could not be met (for example the budget ran out or far
   positions do not fit). If M² is reported as not determined, use
   `waist_not_accessible` or `measurement_failed` instead.
-- `waist_not_accessible`: the waist of an axis lies outside the stage range, so
-  near-waist positions cannot be measured.
+- `waist_not_accessible`: `waist_accessibility` is `outside` for an axis (its
+  waist lies outside the stage range even at ± 2σ) after you measured as close as
+  possible to that stage end, so near-waist positions cannot be measured. Not for
+  `uncertain`.
 - `general_astigmatism_out_of_scope`: the beam shows general astigmatism.
 - `measurement_failed`: no usable measurement was possible.
 
