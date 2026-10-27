@@ -128,6 +128,26 @@ def test_iteration_converges_before_max_iter() -> None:
     assert result.iterations < 25
 
 
+def test_dim_noisy_frames_all_converge() -> None:
+    """At peak ~430 counts the 3 x d rectangle can flip by one pixel each pass.
+
+    Each frame gets its own dark set, as in a real run. Before the
+    repeated-rectangle stopping rule, 20 of the first 100 seeds hit max_iter.
+    """
+    dim_exposure_ms = 3.0  # peak ~ 430 counts at Z_M
+    # Only convergence is checked: at this SNR single-frame widths scatter by
+    # ~5.5 % (1 sigma, up to ~20 %), which a quality flag has to catch.
+    for seed in range(50):
+        dark = mean_dark(_darks(CAMERA, 10, seed=seed + 10_000))
+        rng = np.random.default_rng(seed)
+        frame = render_frame(BEAM, CAMERA, Z_M, dim_exposure_ms, rng)
+        image, _ = subtract_background(frame, dark)
+        result = measure_widths(image, PIXEL_M, max_iter=25)
+        assert result.converged, f"seed {seed}"
+        assert result.iterations < 25, f"seed {seed}"
+        assert np.isfinite(result.d_x_m) and np.isfinite(result.d_y_m)
+
+
 def test_realistic_frames_mean_of_five_repeats() -> None:
     dark = mean_dark(_darks(CAMERA, 10, seed=0))
     rng = np.random.default_rng(1)

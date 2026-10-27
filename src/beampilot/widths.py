@@ -191,7 +191,8 @@ class WidthResult:
         Number of moment calculations used.
     converged : bool
         True if d_x and d_y changed by less than `rtol` between the last two
-        integration areas.
+        integration areas, or if the next integration area would repeat one
+        already used.
     """
 
     d_x_m: float
@@ -281,7 +282,9 @@ def measure_widths(
 
     The first pass uses the whole image. Each further pass uses a rectangle
     centred on the last centroid, 3 * d_x wide and 3 * d_y high (clipped to
-    the image), until d_x and d_y both change by less than `rtol`.
+    the image), until d_x and d_y both change by less than `rtol`, or until
+    the next rectangle is one that was already used (a pixel-level cycle
+    caused by noise; see docs/decisions.md). Both count as converged.
 
     Widths are measured along the lab x and y axes, not along the principal
     axes. The design assumes beams aligned to x/y; for a rotated beam use
@@ -316,6 +319,7 @@ def measure_widths(
     image = np.asarray(image, dtype=np.float64)
     ny, nx = image.shape
     roi = Roi(0, nx, 0, ny)
+    seen: set[Roi] = set()
     previous: tuple[float, float] | None = None
     converged = False
 
@@ -333,7 +337,14 @@ def measure_widths(
             converged = True
             break
         previous = (d_x, d_y)
-        roi = _integration_area(moments, d_x, d_y, pixel_size_m, nx, ny)
+        seen.add(roi)
+        next_roi = _integration_area(moments, d_x, d_y, pixel_size_m, nx, ny)
+        # With noise the rectangle can flip by one pixel each pass; once it
+        # repeats, further passes only cycle through the same areas.
+        if next_roi in seen:
+            converged = True
+            break
+        roi = next_roi
 
     azimuth, ellipticity = _azimuth_and_ellipticity(moments)
     return WidthResult(
