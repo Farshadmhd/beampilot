@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 
 from beampilot import tools
+from beampilot.caustic import CausticFit
 from beampilot.session import (
     MeasurementSession,
     background_drift_scenario,
@@ -353,6 +354,38 @@ def test_evaluate_needs_four_accepted_positions() -> None:
     assert "at least 4" in result["message"]
     assert result["accepted_positions"] == 3
     assert len(result["table"]) == 4
+
+
+@pytest.mark.parametrize(
+    ("m2", "m2_std", "success", "expected"),
+    [
+        (0.95, 0.01, True, True),  # 0.97 < 1: clearly unphysical
+        (0.99, 0.01, True, False),  # 1.01: compatible with M² = 1
+        (0.50, 0.01, False, False),  # failed fit: no physics claim
+        (1.20, 0.01, True, False),
+    ],
+)
+def test_m2_below_1_needs_successful_fit_and_two_sigma(
+    m2: float, m2_std: float, success: bool, expected: bool
+) -> None:
+    fit = CausticFit(
+        d0_m=0.2e-3,
+        d0_std_m=1e-6,
+        z0_m=0.12,
+        z0_std_m=1e-4,
+        theta_rad=8e-3,
+        theta_std_rad=1e-5,
+        z_r_m=0.025,
+        z_r_std_m=1e-4,
+        m2=m2,
+        m2_std=m2_std,
+        residual_rms=0.003,
+        n_points=10,
+        success=success,
+    )
+    session = MeasurementSession(clean_scenario())
+    z = np.linspace(0.05, 0.2, 10)
+    assert tools._axis_result(session, "x", z, fit)["m2_below_1"] is expected
 
 
 def test_repeats_at_one_z_count_as_one_position() -> None:

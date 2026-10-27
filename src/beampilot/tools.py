@@ -392,7 +392,8 @@ def evaluate(session: MeasurementSession, reason: str) -> dict[str, Any]:
     axis gets :func:`beampilot.caustic.fit_caustic` with relative residuals,
     ISO coverage in units of its own zR, and a waist-in-range check. Also
     reports general astigmatism (over all accepted frames), an M² < 1 sanity
-    flag, and a compact table of all measurements.
+    flag (only for a successful fit with M² + 2 sigma < 1), and a compact
+    table of all measurements.
 
     Parameters
     ----------
@@ -551,7 +552,8 @@ def _axis_result(
         "waist_in_stage_range": bool(
             scenario.stage_min_m <= fit.z0_m <= scenario.stage_max_m
         ),
-        "m2_below_1": bool(fit.m2 < 1.0),
+        # M² < 1 is unphysical; flag it only if it holds beyond 2 sigma.
+        "m2_below_1": bool(fit.success and fit.m2 + 2.0 * fit.m2_std < 1.0),
     }
 
 
