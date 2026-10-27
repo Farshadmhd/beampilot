@@ -26,3 +26,17 @@ jobs:
         run: ruff format --check .
       - name: Pytest
         run: pytest
+
+  demo:
+    # The Gradio demo is an optional extra; this job builds its interface
+    # (without launching it) so that test is not skipped.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install package with the demo extra
+        run: python -m pip install -e ".[dev,demo]"
+      - name: Demo tests
+        run: pytest tests/test_demo.py -rs
