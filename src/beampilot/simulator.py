@@ -204,7 +204,7 @@ class Aperture:
             raise ValueError(f"radius_m must be > 0, got {self.radius_m}")
         if not self.z_max_m >= self.z_min_m:
             raise ValueError("z_max_m must be >= z_min_m")
-        for name in ("center_x_m", "center_y_m"):
+        for name in ("radius_m", "z_min_m", "z_max_m", "center_x_m", "center_y_m"):
             if not np.isfinite(getattr(self, name)):
                 raise ValueError(f"{name} must be finite, got {getattr(self, name)}")
 
@@ -238,7 +238,8 @@ class HotPixels:
     Raises
     ------
     ValueError
-        If `extra_counts` is not positive or no pixel is given.
+        If `extra_counts` is not positive, no pixel is given or an index is
+        negative (it would wrap around).
     """
 
     pixels: tuple[tuple[int, int], ...]
@@ -247,6 +248,8 @@ class HotPixels:
     def __post_init__(self) -> None:
         if not self.pixels:
             raise ValueError("pixels must not be empty")
+        if any(row < 0 or column < 0 for row, column in self.pixels):
+            raise ValueError(f"pixel indices must be >= 0, got {self.pixels}")
         if not self.extra_counts > 0:
             raise ValueError(f"extra_counts must be > 0, got {self.extra_counts}")
 

@@ -426,8 +426,9 @@ def run_agent(
             run.report = session.report
             break
         history.extend(_replay_items(response.output))
+        sent = len(history)  # outputs from here on reach the model next call
         history.extend(outputs or [{"role": "user", "content": NUDGE}])
-        _drop_old_images(history, KEEP_IMAGES)
+        _drop_old_images(history, KEEP_IMAGES, sent)
     else:
         run.stop_reason = f"model call limit reached ({config.max_model_calls})"
     if not session.finished:
@@ -545,11 +546,13 @@ def _call_output(
     return {"type": "function_call_output", "call_id": call_id, "output": output}
 
 
-def _drop_old_images(history: list[dict[str, Any]], keep: int) -> None:
+def _drop_old_images(history: list[dict[str, Any]], keep: int, new_from: int) -> None:
     """Replace all but the last `keep` images in `history` with a text stub.
 
-    Items are replaced, not changed in place, so earlier requests keep what
-    was actually sent.
+    Images at index `new_from` or later have not reached the model yet and are
+    never replaced, even if one turn asked for more than `keep` views. Items
+    are replaced, not changed in place, so earlier requests keep what was
+    actually sent.
     """
     with_image = [
         index
@@ -558,6 +561,8 @@ def _drop_old_images(history: list[dict[str, Any]], keep: int) -> None:
         and isinstance(item.get("output"), list)
     ]
     for index in with_image[: max(len(with_image) - keep, 0)]:
+        if index >= new_from:
+            break
         item = history[index]
         text = "".join(
             part.get("text", "")
