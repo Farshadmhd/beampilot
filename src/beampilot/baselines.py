@@ -199,6 +199,7 @@ class _ScriptedOperator:
         self.measured_z: list[float] = []
         self.fit: dict[str, Any] | None = None
         self.exposure_hint = START_EXPOSURE_MS
+        self.remeasured: set[float] = set()  # failed positions tried once more
 
     def scout(self) -> None:
         """Measure 4 scout positions; refill towards the smallest beam.
@@ -275,15 +276,29 @@ class _ScriptedOperator:
             edge, end = min(good_z), z_min
         else:
             edge, end = max(good_z), z_max
-        target = round(0.5 * (edge + end), 1)
-        if abs(target - edge) < 1.0:
-            target = end
-        if any(abs(target - z) < 1.0 for z in self.measured_z):
-            return False
-        self.measure(
-            target, f"Scripted: the fit puts the waist {sides[0]} the measured span."
-        )
-        return True
+        # Bisect towards the stage end. Skip positions that already have a good
+        # measurement; a position that only failed (e.g. a saturated first
+        # scout) may be measured once more, now with a known exposure.
+        candidates = []
+        point = edge
+        for _ in range(3):
+            point = 0.5 * (point + end)
+            candidates.append(round(point, 1))
+        candidates.append(end)
+        for target in candidates:
+            if abs(target - edge) < 1.0 or any(abs(target - z) < 1.0 for z in good_z):
+                continue
+            failed_here = any(abs(target - z) < 1.0 for z in self.measured_z)
+            if failed_here:
+                if target in self.remeasured:
+                    continue
+                self.remeasured.add(target)
+            self.measure(
+                target,
+                f"Scripted: the fit puts the waist {sides[0]} the measured span.",
+            )
+            return True
+        return False
 
     def plan_positions(self, evaluation: dict[str, Any]) -> list[float]:
         """Missing near and far positions per axis, from the current fit."""

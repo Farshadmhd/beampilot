@@ -93,6 +93,18 @@ def test_scripted_finds_a_waist_outside_the_scout_span() -> None:
         assert m2 == pytest.approx(truth[f"m2_{axis}"], rel=0.03)
 
 
+def test_scripted_remeasures_a_failed_scout_to_reach_the_waist() -> None:
+    """Reviewer case: 200x bright, waist at 25 mm. The first scout (31 mm)
+    saturates; extending towards the waist must not stop on that position."""
+    base = clean_scenario()
+    beam = replace(base.beam, z0x_m=0.025, z0y_m=0.025)
+    scenario = replace(base, beam=beam, faults=Faults(power_factor=200.0))
+    session = MeasurementSession(scenario)
+    report = scripted_iso(session)["report"]
+    assert report["verdict"] == "iso_compliant"
+    assert report["evaluation"]["x"]["m2"] is not None
+
+
 def test_scripted_gives_up_at_the_exposure_limit() -> None:
     """1000x brighter: no identical repeats at the minimum exposure."""
     scenario = replace(clean_scenario(), faults=Faults(power_factor=1000.0))
