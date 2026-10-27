@@ -221,3 +221,6 @@ __marimo__/
 
 # Agent run logs (pick runs for replay explicitly into docs/runs/)
 /runs/
+
+# Local dev-server config of the Claude Code preview
+.claude/launch.json
