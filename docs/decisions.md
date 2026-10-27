@@ -87,3 +87,12 @@ std gives one position several times the weight. In a test with 2 % noise per fr
 5 repeats at 10 ISO positions and 300 seeds, the weighted fit's M² scattered by
 0.0080 against 0.0068 unweighted (~18 % noisier), with no bias in either. The
 weighted option stays in `fit_caustic` for callers with better std estimates.
+
+## 2026-10-27: 50 dark frames per dark set
+
+The mean dark is subtracted from every frame of a run, so its fixed pixel noise is
+the same error at every stage position; the caustic fit's residual-based
+uncertainty cannot see it. With 10 darks (5 counts read noise) the M² scatter
+between 12 simulated clean runs was 0.47 % against a reported 0.17 %. With 50 darks
+it is 0.13–0.14 % against a reported 0.15 %, the same as with a perfect dark. Cost:
+40 more frames once per dark set. ISO/TR 11146-3's minimum of 10 is still met.

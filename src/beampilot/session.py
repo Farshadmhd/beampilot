@@ -24,7 +24,10 @@ from beampilot.simulator import (
 )
 from beampilot.widths import WidthResult, mean_dark
 
-N_DARK_FRAMES = 10
+# The mean dark is shared by every position of a run, so its pixel noise is a
+# correlated error that the caustic fit's uncertainty cannot see. 50 frames
+# keep it small (see docs/decisions.md); ISO/TR 11146-3 asks for at least 10.
+N_DARK_FRAMES = 50
 
 
 @dataclass(frozen=True)
@@ -149,7 +152,7 @@ class Measurement:
 class MeasurementSession:
     """State of one run: hidden beam, darks, faults, measurements and log.
 
-    The 10 dark frames are taken once at construction, with the faults that
+    The ``N_DARK_FRAMES`` dark frames are taken at construction, with the faults that
     are active at the start, like a lab run that blocks the beam before it
     begins. They are never retaken, so a later background change shows up
     as a residual offset.

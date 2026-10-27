@@ -49,7 +49,11 @@ def test_darks_include_start_faults_only() -> None:
     assert session.dark_mean.mean() == pytest.approx(
         scenario.camera.offset_counts, abs=0.1
     )
-    assert N_DARK_FRAMES == 10
+    assert N_DARK_FRAMES == 50
+    # Averaging 50 frames reduces the pixel noise by sqrt(50).
+    assert session.dark_mean.std() == pytest.approx(
+        scenario.camera.read_noise_counts / np.sqrt(N_DARK_FRAMES), rel=0.05
+    )
 
 
 def test_set_faults_changes_frames_but_not_darks() -> None:
