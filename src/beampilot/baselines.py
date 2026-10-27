@@ -19,6 +19,7 @@ import numpy as np
 
 from beampilot.session import MeasurementSession
 from beampilot.tools import (
+    STAGE_END_FRACTION,
     evaluate,
     finish,
     get_setup,
@@ -63,8 +64,8 @@ def suggest_verdict(evaluation: dict[str, Any]) -> str:
     not enough data or a failed fit on an axis -> measurement_failed; waist
     accessibility ``outside`` on an axis (z0 +- 2 sigma outside the stage;
     ``uncertain`` does not count) -> waist_not_accessible; general
-    astigmatism -> out of scope; ISO coverage
-    met on both axes -> iso_compliant; otherwise estimate_not_compliant.
+    astigmatism -> out of scope; ISO coverage met on both axes and no M² < 1
+    flag -> iso_compliant; otherwise estimate_not_compliant.
 
     Parameters
     ----------
@@ -85,7 +86,7 @@ def suggest_verdict(evaluation: dict[str, Any]) -> str:
         return "waist_not_accessible"
     if evaluation["general_astigmatism"]:
         return "general_astigmatism_out_of_scope"
-    if evaluation["iso_coverage_met"]:
+    if evaluation["iso_coverage_met"] and not evaluation.get("m2_below_1"):
         return "iso_compliant"
     return "estimate_not_compliant"
 
@@ -265,8 +266,10 @@ class _ScriptedOperator:
         For ``waist_side`` below / above, or accessibility ``uncertain``,
         bisect between the outermost good position and that stage end; for
         ``within``, measure the middle of the gap. A waist reported
-        ``outside`` is also approached until the stage end on its side has
-        been measured, because a far-field-only fit can misplace it.
+        ``outside`` is approached the same way, because a far-field-only fit
+        can misplace it. Approaching stops once an accepted position lies
+        within ``STAGE_END_FRACTION`` of that stage end (as ``finish`` checks
+        for ``waist_not_accessible``).
 
         Returns True if a measurement was taken.
         """
@@ -290,13 +293,17 @@ class _ScriptedOperator:
                     )
                     return True
                 continue
-            if side is None and result["waist_accessibility"] == "uncertain":
+            access = result["waist_accessibility"]
+            if side is None and access == "uncertain":
                 side = "below" if result["waist_near_stage_end"] == "start" else "above"
+            if side is None and access == "outside" and result["z0_mm"] is not None:
+                side = "below" if result["z0_mm"] < z_min else "above"
             if side not in ("below", "above"):
                 continue
             end = z_min if side == "below" else z_max
-            if any(abs(end - z) < 1.0 for z in good_z):
-                continue  # the stage end on that side is measured already
+            margin = STAGE_END_FRACTION * (z_max - z_min)
+            if any(abs(end - z) <= margin for z in good_z):
+                continue  # that stage end is reached (the margin finish checks)
             edge = min(good_z) if side == "below" else max(good_z)
             if self._measure_towards(edge, end, side):
                 return True
@@ -559,7 +566,12 @@ def _beam_area(result: dict[str, Any]) -> float:
 
 def _finish(session: MeasurementSession, verdict: str, explanation: str) -> dict:
     result = finish(session, verdict, explanation)
-    if "error" in result and verdict == "iso_compliant":
-        # Should not happen (the rules use the same coverage), but never hang.
-        result = finish(session, "estimate_not_compliant", explanation)
+    if "error" in result:
+        # The rules mirror finish's guards, so this should not happen; if it
+        # does, say so instead of hiding it behind the original explanation.
+        result = finish(
+            session,
+            "estimate_not_compliant",
+            f"Scripted: finish refused {verdict} ({result['error']}).",
+        )
     return result

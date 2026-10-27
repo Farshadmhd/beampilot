@@ -423,6 +423,8 @@ def test_evaluate_needs_four_accepted_positions() -> None:
     ("m2", "m2_std", "success", "expected"),
     [
         (0.95, 0.01, True, True),  # 0.97 < 1: clearly unphysical
+        # Tiny Jacobian sigma: floored at 1 % of M², so 0.997 + 0.02 > 1.
+        (0.997, 0.0005, True, False),
         (0.99, 0.01, True, False),  # 1.01: compatible with M² = 1
         (0.50, 0.01, False, False),  # failed fit: no physics claim
         (1.20, 0.01, True, False),
@@ -523,6 +525,28 @@ def test_finish_refuses_iso_compliant_with_a_red_flag(
     refused = finish(session, "iso_compliant", "coverage is met")
     assert message in refused["error"]
     assert not session.finished
+
+
+def test_finish_needs_the_stage_end_for_waist_not_accessible() -> None:
+    """Waist at -50 mm. Points from 15 mm already look 'outside', but the
+    stage start (0 mm) is not approached within 12.5 mm: refused until a
+    point near it is accepted."""
+    session = MeasurementSession(waist_outside_range_scenario())
+    _measure_and_accept(session, [15.0, 20.0, 30.0, 40.0, 50.0, 60.0])
+    assert evaluate(session, REASON)["x"]["waist_accessibility"] == "outside"
+    refused = finish(session, "waist_not_accessible", "looks outside")
+    assert "measure closer" in refused["error"]
+    assert not session.finished
+    _measure_and_accept(session, [5.0])  # within 5 % (12.5 mm) of the start
+    done = finish(session, "waist_not_accessible", "outside after approaching 0 mm")
+    assert done["report"]["verdict"] == "waist_not_accessible"
+
+
+def test_finish_refuses_waist_not_accessible_for_an_inside_waist() -> None:
+    session = MeasurementSession(clean_scenario())
+    _measure_and_accept(session, _iso_positions_mm(session))
+    refused = finish(session, "waist_not_accessible", "wrong")
+    assert "no axis has waist_accessibility 'outside'" in refused["error"]
 
 
 def test_finish_refuses_iso_compliant_without_data() -> None:

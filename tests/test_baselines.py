@@ -110,6 +110,17 @@ def test_scripted_waist_two_mm_from_a_stage_end(z0_m: float) -> None:
         )
 
 
+def test_scripted_true_m2_of_one_is_iso_compliant() -> None:
+    """Reviewer case: M² = 1.0, seed 5 fitted 0.997 with a tiny sigma and
+    the M² < 1 guard refused the correct verdict."""
+    base = clean_scenario(seed=5)
+    beam = replace(base.beam, m2x=1.0, m2y=1.0)
+    session = MeasurementSession(replace(base, beam=beam))
+    report = scripted_iso(session)["report"]
+    assert report["verdict"] == "iso_compliant"
+    assert not report["evaluation"]["m2_below_1"]
+
+
 def test_largest_gap_midpoint() -> None:
     gap = baselines._ScriptedOperator._largest_gap_midpoint
     # Gaps 3.2, 5.0, 7.4, 7.5, 3.9: the largest is 15.6-23.1.

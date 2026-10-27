@@ -40,6 +40,10 @@ MIN_PIXELS_ACROSS = 20  # ISO 11146-1: at least 20 px across the beam width
 BACKGROUND_SIGMA_LIMIT = 4.0
 ALIGNMENT_LIMIT_DEG = 10.0  # principal axes vs lab x/y
 MAX_CLIPPING_LOSS = 0.01  # ISO 11146-1: power outside the sensor below 1 %
+M2_STD_FLOOR_REL = 0.01  # smallest M² uncertainty used for the M² < 1 flag
+# waist_not_accessible needs an accepted position this close to the stage end
+# on the waist's side (fraction of the stage length).
+STAGE_END_FRACTION = 0.05
 # Modelled beam light in the corner patches, in offset standard errors, from
 # which the offset counts as beam light rather than background.
 CORNER_LIGHT_SIGMA = 1.0
@@ -466,7 +470,9 @@ def finish(
 
     ``iso_compliant`` is refused if, on a fresh evaluation of the accepted
     measurements, ISO coverage is not met on both axes, general astigmatism
-    is flagged, or M² < 1 is flagged.
+    is flagged, or M² < 1 is flagged. ``waist_not_accessible`` is refused
+    unless an axis's waist is ``outside`` and an accepted position lies near
+    the stage end on that side.
 
     Parameters
     ----------
@@ -509,7 +515,48 @@ def finish(
             "cannot report iso_compliant: M² < 1 is flagged, so the data are not "
             "sound; check the measurements or choose another verdict"
         )
+    if verdict == "waist_not_accessible":
+        problem = _waist_not_accessible_problem(session, evaluation)
+        if problem:
+            raise ToolInputError(f"cannot report waist_not_accessible: {problem}")
     return {"report": _write_report(session, verdict, explanation, evaluation)}
+
+
+def _waist_not_accessible_problem(
+    session: MeasurementSession, evaluation: dict[str, Any]
+) -> str | None:
+    """Why waist_not_accessible is not supported yet, or None if it is.
+
+    Needs an axis with accessibility ``outside`` and an accepted position
+    within ``STAGE_END_FRACTION`` of the stage length from the stage end on
+    that waist's side: a far-field-only fit can misplace the waist, so the
+    end must have been approached first.
+    """
+    if evaluation.get("status") != "ok":
+        return "not enough data to locate the waist"
+    scenario = session.scenario
+    margin = STAGE_END_FRACTION * (scenario.stage_max_m - scenario.stage_min_m)
+    accepted = [m.z_m for m in session.measurements.values() if m.status == "accept"]
+    outside = []
+    for axis in ("x", "y"):
+        result = evaluation[axis]
+        if result["waist_accessibility"] != "outside":
+            continue
+        below = result["waist_side"] == "below" or (
+            result["waist_side"] is None
+            and (result["z0_mm"] or 0.0) * 1e-3 < scenario.stage_min_m
+        )
+        end = scenario.stage_min_m if below else scenario.stage_max_m
+        if any(abs(z - end) <= margin for z in accepted):
+            return None
+        outside.append(f"{axis} (stage {'start' if below else 'end'})")
+    if not outside:
+        return "no axis has waist_accessibility 'outside'"
+    return (
+        f"the waist of {', '.join(outside)} looks outside, but no accepted position "
+        f"lies within {margin * 1e3:.1f} mm of that stage end yet; measure closer "
+        "to it first"
+    )
 
 
 def fallback_report(session: MeasurementSession, reason: str) -> dict[str, Any]:
@@ -704,8 +751,13 @@ def _axis_result(
         # a waist outside the stage shows up. None if the fit failed.
         "waist_accessibility": accessibility,
         "waist_near_stage_end": near_end,
-        # M² < 1 is unphysical; flag it only if it holds beyond 2 sigma.
-        "m2_below_1": bool(determined and fit.m2 + 2.0 * fit.m2_std < 1.0),
+        # M² < 1 is unphysical; flag it only if it holds beyond 2 sigma. The
+        # Jacobian sigma misses systematic errors (one-sided data, shared dark),
+        # so it is floored at M2_STD_FLOOR_REL of M².
+        "m2_below_1": bool(
+            determined
+            and fit.m2 + 2.0 * max(fit.m2_std, M2_STD_FLOOR_REL * fit.m2) < 1.0
+        ),
     }
 
 
