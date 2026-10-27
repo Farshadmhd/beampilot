@@ -294,8 +294,14 @@ def general_astigmatism(
     applies, which is out of scope for BeamPilot. Profiles with ellipticity
     above `circular_threshold` count as circular (their azimuth is noise) and
     are ignored, as are profiles with a non-finite azimuth or ellipticity.
-    Azimuths are compared modulo 180 degrees: 89 and -89 degrees describe
-    axes only 2 degrees apart.
+
+    Azimuths are compared modulo 90 degrees, because what matters is the pair
+    of principal axes, not which of them is the major one. The azimuth from
+    :func:`beampilot.widths.measure_widths` is that of the major axis, and a
+    beam with simple astigmatism swaps major and minor axis where d_x = d_y:
+    its azimuth jumps from 90 to 0 degrees although the axis pair stays put.
+    So 0 and 90 degrees count as the same axis pair, and 89 and -89 degrees
+    differ by 2 degrees.
 
     Parameters
     ----------
@@ -334,9 +340,10 @@ def general_astigmatism(
         & (ellipticity <= circular_threshold)
     )
     max_diff_rad = np.radians(max_diff_deg)
+    quarter_turn = np.pi / 2.0
     for a, b in combinations(azimuths[usable], 2):
-        diff = (a - b) % np.pi
-        if min(diff, np.pi - diff) > max_diff_rad:
+        diff = (a - b) % quarter_turn
+        if min(diff, quarter_turn - diff) > max_diff_rad:
             return True
     return False
 

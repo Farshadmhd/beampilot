@@ -169,8 +169,10 @@ def test_coverage_rejects_non_positive_rayleigh_length() -> None:
         ([5.0, 12.0], [0.5, 0.5], False),  # 7 deg apart
         ([0.0, 45.0], [0.5, 0.95], False),  # second is circular: ignored
         ([0.0, 45.0, 70.0], [0.95, 0.9, 0.5], False),  # only one non-circular
-        ([89.0, -89.0], [0.5, 0.5], False),  # 2 deg apart modulo 180
-        ([80.0, -80.0], [0.5, 0.5], True),  # 20 deg apart modulo 180
+        ([89.0, -89.0], [0.5, 0.5], False),  # 2 deg apart
+        ([80.0, -80.0], [0.5, 0.5], True),  # 20 deg apart
+        ([0.0, 90.0], [0.5, 0.5], False),  # major/minor swap: same axis pair
+        ([0.0, 45.0], [0.5, 0.5], True),  # axes rotated by 45 deg
         ([0.0, 30.0], [0.5, np.nan], False),  # failed profile: ignored
         ([], [], False),
     ],
@@ -179,6 +181,42 @@ def test_general_astigmatism(
     azimuths_deg: list[float], ellipticities: list[float], expected: bool
 ) -> None:
     assert general_astigmatism(np.radians(azimuths_deg), ellipticities) is expected
+
+
+def test_simple_astigmatic_beam_is_not_general_astigmatism() -> None:
+    """x and y waists 2 zR apart: the major axis swaps from y to x along z."""
+    z_r = rayleigh_length(0.2e-3, 1.0, WAVELENGTH_M)
+    beam = BeamParams(
+        wavelength_m=WAVELENGTH_M,
+        d0x_m=0.2e-3,
+        d0y_m=0.2e-3,
+        z0x_m=0.0,
+        z0y_m=2 * z_r,
+        m2x=1.0,
+        m2y=1.0,
+    )
+    camera = CameraConfig(
+        pixel_size_m=5.5e-6,
+        nx=512,
+        ny=512,
+        bit_depth=12,
+        offset_counts=0.0,
+        read_noise_counts=0.0,
+        signal_counts_per_ms=1e6,
+        shot_noise=False,
+    )
+    rng = np.random.default_rng(0)
+    results = [
+        measure_widths(render_frame(beam, camera, z, 1.0, rng), camera.pixel_size_m)
+        for z in np.array([-1.0, -0.5, 0.0, 1.0, 2.0, 2.5, 3.0]) * z_r
+    ]
+    azimuths = np.array([r.azimuth_rad for r in results])
+    ellipticities = np.array([r.ellipticity for r in results])
+    non_circular = ellipticities <= 0.87
+    # Both orientations occur among the non-circular profiles.
+    assert np.any(np.abs(azimuths[non_circular]) < 0.01)
+    assert np.any(np.abs(azimuths[non_circular]) > np.radians(89.0))
+    assert not general_astigmatism(azimuths, ellipticities)
 
 
 def test_general_astigmatism_shape_mismatch_raises() -> None:
