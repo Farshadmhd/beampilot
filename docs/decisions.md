@@ -135,3 +135,17 @@ understates the loss by up to ~25 % near the 1 % limit.
    (e.g. waist_outside_range at 180 mm plus 3 counts). Subtracting the modelled
    corner light and testing the rest would catch it, but the model runs ~30 % low
    for clipped beams, so it needs a looser limit; left as is for now.
+
+## 2026-10-27: No extrapolated waist numbers
+
+`evaluate` and the `finish` report show d0, z0, zR and M² of an axis as null with a
+`not_determined` reason if the fit failed or its waist lies outside the measured z
+range. Reason: a far-field-only fit collapses (d0 → 0, M² → 0) and must never reach
+the report as a number. θ stays (the far-field slope is measured), and
+`waist_in_stage_range` still uses the fitted z0, which is how a waist outside the
+stage is detected. `waist_side` (below/above) tells the operator where to measure
+next. Known cost: a waist inside the stage but outside the measured span is also
+nulled until a position on its side is measured; the scripted baseline does that
+(10/10 seeds compliant for waists 10–30 mm and 235–245 mm from the stage start).
+The reviewer's alternative, null only when no accepted point lies within ~1–2 zR of
+the fitted waist, is left open for the maintainer.

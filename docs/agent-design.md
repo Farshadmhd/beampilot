@@ -57,6 +57,10 @@ Every tool has a required `reason` string. Tool schemas are strict, and verdicts
      ("x: 3 within ±1 zR, need about 5; 1 beyond 2 zR, need about 5"),
      waist inside stage range (yes/no), general-astigmatism check, M² < 1 sanity flag,
      and a compact table of all measurements.
+   - If an axis fit fails, or its fitted waist lies outside the measured z range, d0, z0,
+     zR and M² of that axis are reported as null with a `not_determined` reason (and
+     `waist_side`: below/above the measured range), never as an extrapolated number.
+     The same applies to the `finish` report.
 5. `finish(verdict, explanation)`
    - `verdict` is one of: `iso_compliant`, `estimate_not_compliant`, `waist_not_accessible`,
      `general_astigmatism_out_of_scope`, `measurement_failed`.
