@@ -262,3 +262,16 @@ The simulator gained an `Aperture` (iris over a z range, profile truncated,
 diffraction ignored; known answer: truncated-Gaussian second moment
 σ² = (w²/4)(1 − A e^−A / (1 − e^−A)), A = 2a²/w²), `HotPixels` (extra counts in
 light frames only) and a pointing drift per measurement, for evaluation group C.
+
+## 2026-10-27: model-call limit 60 and parallel tool calls (evaluation v2)
+
+In evaluation v1, A8 and C2 were stopped by the 40-model-call limit before `finish`,
+and in 12 of 31 agent runs the model made one tool call per model call. The default
+`max_model_calls` is now 60; the token budget (1.5 M) and the cost cap ($0.50 per
+run) are unchanged. The prompt now says plainly that independent tool calls are to be
+requested together in one turn, and that after each `evaluate` the agent plans the
+missing positions at once and accepts, rejects and evaluates in the same turn. To
+stay under 1,500 words, two sentences were shortened (the frames-per-position rule,
+the saturation hint) and "You explain every decision briefly" was dropped; the
+required `reason` argument covers it. Pre-registered as `docs/evaluation-plan-v2.md`
+before these changes.

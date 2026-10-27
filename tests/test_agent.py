@@ -104,6 +104,42 @@ def test_loop_runs_tool_calls_and_stops_after_finish() -> None:
     assert run.steps[1]["tool_calls"][0]["reason"] == "test"
 
 
+def test_parallel_calls_of_one_turn_all_run_in_order_and_return() -> None:
+    planned = [100.0, 110.0, 130.0, 140.0, 40.0, 200.0]
+    batch = [_call("measure_at", z_mm=z, exposure_ms=1.5) for z in planned]
+    statuses = [
+        _call("set_status", measurement_id=f"m{i}", status="accept")
+        for i in range(1, len(planned) + 1)
+    ]
+    client = FakeClient(
+        [
+            _response(*batch),
+            _response(*statuses, _call("evaluate")),
+            _response(_call("finish", verdict="measurement_failed", explanation="x")),
+        ]
+    )
+    session = _session()
+    run = run_agent(session, client)
+    # Every call of a turn was executed, in the order given, in one model call.
+    assert [m.z_m * 1e3 for m in session.measurements.values()] == pytest.approx(
+        planned
+    )
+    assert all(m.status == "accept" for m in session.measurements.values())
+    assert [len(step["tool_calls"]) for step in run.steps] == [6, 7, 1]
+    assert run.steps[1]["tool_calls"][-1]["result"]["status"] == "ok"
+    # Each call got its own output, matched by call_id, in the next request.
+    sent = _outputs(client.requests[1])[-len(batch) :]
+    assert [o["call_id"] for o in sent] == [c.call_id for c in batch]
+    assert [json.loads(o["output"])["measurement_id"] for o in sent] == [
+        f"m{i}" for i in range(1, 7)
+    ]
+    assert len(client.requests) == 3
+
+
+def test_default_call_limit_is_60() -> None:
+    assert AgentConfig().max_model_calls == 60
+
+
 def _reasoning(encrypted="enc-abc") -> SimpleNamespace:
     return SimpleNamespace(type="reasoning", summary=[], encrypted_content=encrypted)
 

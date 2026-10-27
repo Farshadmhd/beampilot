@@ -95,7 +95,7 @@ def main() -> int:
     parser.add_argument("--note", default=None, help="operator note for the agent")
     parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument("--effort", default=DEFAULT_EFFORT)
-    parser.add_argument("--max-calls", type=int, default=40)
+    parser.add_argument("--max-calls", type=int, default=60)
     parser.add_argument("--max-cost", type=float, default=0.50, help="USD per run")
     args = parser.parse_args()
 
