@@ -19,7 +19,13 @@ import numpy as np
 
 from beampilot.caustic import CausticFit, coverage, fit_caustic, general_astigmatism
 from beampilot.session import N_DARK_FRAMES, Measurement, MeasurementSession
-from beampilot.widths import measure_widths, subtract_background, width_statistics
+from beampilot.widths import (
+    DEFAULT_CORNER_FRACTION,
+    Roi,
+    measure_widths,
+    subtract_background,
+    width_statistics,
+)
 
 # Quality-flag thresholds.
 LOW_SIGNAL_COUNTS = 500.0  # background-subtracted peak in counts
@@ -46,6 +52,9 @@ REJECT_FLAGS = {
     "not_converged": "width iteration failed or did not converge",
 }
 WARNING_FLAGS = {
+    "beam_in_corners": "the beam area reaches the corner patches used for the "
+    "background offset: beam light there inflates the offset and biases widths "
+    "low; centre the beam or measure where it is smaller",
     "background_changed": "background differs from the dark frames "
     "(corrected by the corner offset, but check the setup)",
     "axes_not_aligned": "elliptical beam not aligned to x/y: lab-axis widths "
@@ -153,14 +162,17 @@ def measure_at(
     - ``roi_clipped``: the 3 x d integration area hit the sensor edge.
     - ``too_few_pixels``: the smaller mean width spans fewer than 20 pixels.
     - ``not_converged``: a frame's width iteration failed or did not settle.
-    - ``background_changed``: in some frame |residual offset| exceeds 4 times
-      its standard error (ISO/TR 11146-3), i.e. the background is no longer
-      the one in the dark frames.
+    - ``beam_in_corners``: in some frame the converged 3 x d rectangle
+      overlaps a corner patch used for the fine offset, so beam light may
+      inflate the offset.
+    - ``background_changed``: in some frame without beam in the corners,
+      |residual offset| exceeds 4 times its standard error, i.e. the
+      background is no longer the one in the dark frames.
     - ``axes_not_aligned``: for the non-circular frames (ellipticity <= 0.87),
       the median azimuth deviates from the x/y axes by more than 10 degrees
       (azimuth taken modulo 90 degrees).
 
-    The first five make the suggested verdict ``"reject"``; the last two are
+    The first five make the suggested verdict ``"reject"``; the last three are
     warnings. The measurement is stored with status ``"pending"``.
 
     Parameters
@@ -205,15 +217,18 @@ def measure_at(
     z_m = z_mm * 1e-3
     pixel_m = camera.pixel_size_m
     widths, peaks, offsets, offset_ratios, saturation = [], [], [], [], []
+    in_corners = []
     for raw in session.take_frames(z_m, exposure_ms):
         saturation.append(float(np.mean(raw >= camera.full_scale_counts)))
         image, background = subtract_background(raw, session.dark_mean)
-        widths.append(measure_widths(image, pixel_m))
+        width = measure_widths(image, pixel_m)
+        widths.append(width)
         peaks.append(float(image.max()))
         offsets.append(background.offset_counts)
         offset_ratios.append(
             abs(background.offset_counts) / background.offset_std_err_counts
         )
+        in_corners.append(_roi_in_corners(width.roi, camera.nx, camera.ny))
     stats = width_statistics(widths)
     pixels_across = min(stats.d_x_mean_m, stats.d_y_mean_m) / pixel_m
     misalignment_deg = _median_misalignment_deg(widths)
@@ -224,7 +239,12 @@ def measure_at(
         "roi_clipped": any(w.roi_clipped for w in widths),
         "too_few_pixels": bool(pixels_across < MIN_PIXELS_ACROSS),
         "not_converged": not all(w.converged for w in widths),
-        "background_changed": max(offset_ratios) > BACKGROUND_SIGMA_LIMIT,
+        "beam_in_corners": any(in_corners),
+        # Frames with beam light in the corners say nothing about the background.
+        "background_changed": any(
+            ratio > BACKGROUND_SIGMA_LIMIT and not corner
+            for ratio, corner in zip(offset_ratios, in_corners, strict=True)
+        ),
         "axes_not_aligned": bool(misalignment_deg > ALIGNMENT_LIMIT_DEG),
     }
     flags = {name: bool(value) for name, value in flags.items()}  # no numpy bools
@@ -545,6 +565,21 @@ def _table_row(m: Measurement) -> dict[str, Any]:
         "suggested": m.suggested_verdict,
         "flags": [name for name, value in m.flags.items() if value],
     }
+
+
+def _roi_in_corners(roi: Roi, nx: int, ny: int) -> bool:
+    """True if the integration area overlaps one of the four corner patches.
+
+    The patches are the ones :func:`beampilot.widths.subtract_background`
+    uses for the fine offset (default corner fraction).
+    """
+    cx = max(1, round(DEFAULT_CORNER_FRACTION * nx))
+    cy = max(1, round(DEFAULT_CORNER_FRACTION * ny))
+    # A rectangle that reaches into an edge column band and an edge row band
+    # always covers the patch where the two bands cross.
+    reaches_x_band = roi.x_start < cx or roi.x_stop > nx - cx
+    reaches_y_band = roi.y_start < cy or roi.y_stop > ny - cy
+    return reaches_x_band and reaches_y_band
 
 
 def _median_misalignment_deg(widths: list) -> float:

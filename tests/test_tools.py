@@ -284,6 +284,30 @@ def test_retake_darks_needs_budget() -> None:
     assert "budget" in measure_at(session, 120.0, 1.5, REASON)["error"]
 
 
+def test_large_beam_reports_beam_in_corners_not_background_changed() -> None:
+    """d ~ 1.9 mm on a 2.8 mm sensor: beam light reaches the corner patches."""
+    session = MeasurementSession(waist_outside_range_scenario())
+    result = measure_at(session, 180.0, _exposure_ms(session, 180.0), REASON)
+    assert result["flags"]["beam_in_corners"]
+    assert not result["flags"]["background_changed"]
+    assert any("corner patches" in text for text in result["warnings"])
+
+
+@pytest.mark.parametrize(
+    ("roi", "expected"),
+    [
+        (Roi(100, 400, 100, 400), False),  # centred, clear of all patches
+        (Roi(0, 512, 100, 400), False),  # full width, but not the corner rows
+        (Roi(100, 400, 0, 512), False),  # full height, but not the corner columns
+        (Roi(10, 300, 10, 300), True),  # top-left patch (patches are 18 px)
+        (Roi(300, 500, 300, 500), True),  # bottom-right patch
+        (Roi(18, 494, 18, 494), False),  # just clear of all patches
+    ],
+)
+def test_roi_in_corners_geometry(roi: Roi, expected: bool) -> None:
+    assert tools._roi_in_corners(roi, 512, 512) is expected
+
+
 def test_controller_can_switch_room_light_on() -> None:
     session = MeasurementSession(clean_scenario())
     session.set_faults(extra_background_counts=3.0)
