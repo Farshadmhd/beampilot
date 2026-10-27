@@ -182,7 +182,7 @@ class AgentConfig:
     reasoning_effort : str
         ``minimal``, ``low``, ``medium``, ``high`` or ``xhigh``. Default low.
     max_model_calls : int
-        Hard limit on model calls per run. Default 40.
+        Hard limit on model calls per run. Default 60.
     max_total_tokens : int
         Token budget per run (input + output, cached input included).
         Default 1,500,000.
@@ -198,7 +198,7 @@ class AgentConfig:
 
     model: str = DEFAULT_MODEL
     reasoning_effort: str = DEFAULT_EFFORT
-    max_model_calls: int = 40
+    max_model_calls: int = 60
     max_total_tokens: int = 1_500_000
     max_cost_usd: float = 0.50
     max_output_tokens: int = 8000
