@@ -107,6 +107,64 @@ class CameraConfig:
         return 2**self.bit_depth - 1
 
 
+@dataclass(frozen=True)
+class Ghost:
+    """A second, weaker Gaussian spot on the sensor, e.g. a reflection.
+
+    The ghost follows the main beam's caustic, scaled by `size_factor`, and
+    sits at an offset from the main beam's centre. The offset can change
+    linearly with z, and the ghost can be limited to a z window.
+
+    Parameters
+    ----------
+    relative_power : float
+        Ghost power relative to the main beam (> 0), e.g. 0.1.
+    offset_x_m, offset_y_m : float
+        Ghost centre relative to the main beam centre at z = 0, in m.
+    offset_x_per_m, offset_y_per_m : float, optional
+        Change of the offset per m of z (dimensionless). Default 0.
+    size_factor : float, optional
+        Ghost width relative to the main beam width at the same z (> 0).
+        Default 1.
+    z_min_m, z_max_m : float, optional
+        The ghost is present only for z_min <= z <= z_max, in m. Default:
+        everywhere.
+
+    Raises
+    ------
+    ValueError
+        If the power or size factor is not positive or the z window is empty.
+    """
+
+    relative_power: float
+    offset_x_m: float
+    offset_y_m: float
+    offset_x_per_m: float = 0.0
+    offset_y_per_m: float = 0.0
+    size_factor: float = 1.0
+    z_min_m: float = -np.inf
+    z_max_m: float = np.inf
+
+    def __post_init__(self) -> None:
+        if not self.relative_power > 0:
+            raise ValueError(f"relative_power must be > 0, got {self.relative_power}")
+        if not self.size_factor > 0:
+            raise ValueError(f"size_factor must be > 0, got {self.size_factor}")
+        if not self.z_max_m >= self.z_min_m:
+            raise ValueError("z_max_m must be >= z_min_m")
+
+    def present_at(self, z_m: float) -> bool:
+        """True if the ghost is on the sensor at stage position `z_m` (m)."""
+        return bool(self.z_min_m <= z_m <= self.z_max_m)
+
+    def offset_at(self, z_m: float) -> tuple[float, float]:
+        """Ghost offset from the main beam centre at `z_m`, in m."""
+        return (
+            self.offset_x_m + self.offset_x_per_m * z_m,
+            self.offset_y_m + self.offset_y_per_m * z_m,
+        )
+
+
 def rayleigh_length(d0_m: float, m2: float, wavelength_m: float) -> float:
     """Rayleigh length zR = pi * d0**2 / (4 * M² * wavelength).
 
@@ -166,13 +224,15 @@ def render_frame(
     rng: np.random.Generator,
     x0_m: float = 0.0,
     y0_m: float = 0.0,
+    ghost: Ghost | None = None,
 ) -> NDArray[np.int32]:
     """Render one camera frame of the beam.
 
     The total beam signal is proportional to the exposure, so the peak pixel
     value is highest near the waist and saturation happens there first. Parts
     of the beam outside the sensor are truncated, not rescaled, so the frame
-    sum drops when the beam outgrows the sensor (ISO clipping loss).
+    sum drops when the beam outgrows the sensor (ISO clipping loss). An
+    optional ghost adds a second, weaker spot (see :class:`Ghost`).
 
     Parameters
     ----------
@@ -190,6 +250,8 @@ def render_frame(
         Beam centre relative to the sensor centre in m. Positive x0 moves the
         beam towards higher column indices, positive y0 towards higher row
         indices. Default 0.0 (centred).
+    ghost : Ghost, optional
+        Second, weaker spot (e.g. a reflection). Default None.
 
     Returns
     -------
@@ -206,14 +268,40 @@ def render_frame(
 
     d_x = beam_diameter(z_m, beam.d0x_m, beam.z0x_m, beam.m2x, beam.wavelength_m)
     d_y = beam_diameter(z_m, beam.d0y_m, beam.z0y_m, beam.m2y, beam.wavelength_m)
-    sigma_x, sigma_y = d_x / 4.0, d_y / 4.0
+    total_counts = camera.signal_counts_per_ms * exposure_ms
+    signal_counts = _gaussian_spot(camera, total_counts, d_x, d_y, x0_m, y0_m)
+    if ghost is not None and ghost.present_at(z_m):
+        offset_x, offset_y = ghost.offset_at(z_m)
+        signal_counts += _gaussian_spot(
+            camera,
+            total_counts * ghost.relative_power,
+            d_x * ghost.size_factor,
+            d_y * ghost.size_factor,
+            x0_m + offset_x,
+            y0_m + offset_y,
+        )
+    if camera.shot_noise:
+        signal_counts = rng.poisson(signal_counts).astype(np.float64)
+    return _digitise(signal_counts, camera, rng)
 
-    # Pixel-centre coordinates relative to the beam centre.
+
+def _gaussian_spot(
+    camera: CameraConfig,
+    total_counts: float,
+    d_x_m: float,
+    d_y_m: float,
+    x0_m: float,
+    y0_m: float,
+) -> NDArray[np.float64]:
+    """Gaussian spot with 4-sigma widths d_x, d_y and `total_counts` in total.
+
+    The peak is set so that the profile integrates to `total_counts` over an
+    unbounded sensor; parts outside the sensor are lost.
+    """
+    sigma_x, sigma_y = d_x_m / 4.0, d_y_m / 4.0
+    # Pixel-centre coordinates relative to the spot centre.
     x_m = (np.arange(camera.nx) - (camera.nx - 1) / 2.0) * camera.pixel_size_m - x0_m
     y_m = (np.arange(camera.ny) - (camera.ny - 1) / 2.0) * camera.pixel_size_m - y0_m
-
-    # Peak counts per pixel so that the profile integrates to the total signal.
-    total_counts = camera.signal_counts_per_ms * exposure_ms
     peak_counts = (
         total_counts * camera.pixel_size_m**2 / (2.0 * np.pi * sigma_x * sigma_y)
     )
@@ -221,10 +309,7 @@ def render_frame(
         -0.5 * (x_m[np.newaxis, :] / sigma_x) ** 2
         - 0.5 * (y_m[:, np.newaxis] / sigma_y) ** 2
     )
-    signal_counts = peak_counts * profile
-    if camera.shot_noise:
-        signal_counts = rng.poisson(signal_counts).astype(np.float64)
-    return _digitise(signal_counts, camera, rng)
+    return peak_counts * profile
 
 
 def dark_frame(camera: CameraConfig, rng: np.random.Generator) -> NDArray[np.int32]:

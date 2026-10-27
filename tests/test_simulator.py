@@ -8,11 +8,13 @@ import pytest
 from beampilot.simulator import (
     BeamParams,
     CameraConfig,
+    Ghost,
     beam_diameter,
     dark_frame,
     rayleigh_length,
     render_frame,
 )
+from beampilot.widths import Roi, measure_widths, second_moments
 
 # Astigmatic test beam: different waist sizes, positions and M² per axis.
 BEAM = BeamParams(
@@ -189,3 +191,80 @@ def test_dark_frame_has_offset_and_read_noise() -> None:
     assert frame.mean() == pytest.approx(CAMERA.offset_counts, abs=0.1)
     # Rounding adds a variance of 1/12 count², negligible against 5 counts.
     assert frame.std() == pytest.approx(CAMERA.read_noise_counts, rel=0.02)
+
+
+# Ghost reflection
+
+
+GHOST_Z_M = 0.25  # d_x ~ 698 um, d_y ~ 772 um
+
+
+def _frame(ghost=None, z_m=GHOST_Z_M) -> np.ndarray:
+    return render_frame(
+        BEAM, NOISELESS, z_m, 10.0, np.random.default_rng(0), ghost=ghost
+    ).astype(np.float64)
+
+
+def test_ghost_second_moments_match_the_two_spot_mixture() -> None:
+    """Two equal-width spots, power ratio r, offset dx: the mixture has
+    sigma_x² = sigma² + w1 w2 dx² (w1 = 1/(1+r), w2 = r/(1+r)), its centroid
+    moves by w2 dx, and the y moment is unchanged."""
+    r, dx = 0.1, 0.3e-3
+    full = Roi(0, NOISELESS.nx, 0, NOISELESS.ny)
+    clean = second_moments(_frame(), NOISELESS.pixel_size_m, full)
+    ghosted = second_moments(
+        _frame(Ghost(relative_power=r, offset_x_m=dx, offset_y_m=0.0)),
+        NOISELESS.pixel_size_m,
+        full,
+    )
+    w1, w2 = 1 / (1 + r), r / (1 + r)
+    # Integer rounding of the faint tails costs ~0.1 % of the shift.
+    assert ghosted.x_c_m - clean.x_c_m == pytest.approx(w2 * dx, rel=2e-3)
+    assert ghosted.var_x_m2 == pytest.approx(clean.var_x_m2 + w1 * w2 * dx**2, rel=1e-3)
+    assert ghosted.var_y_m2 == pytest.approx(clean.var_y_m2, rel=1e-3)
+    assert ghosted.total_counts == pytest.approx(clean.total_counts * (1 + r), rel=1e-3)
+
+
+@pytest.mark.parametrize(
+    ("offset_x_m", "offset_y_m"), [(0.3e-3, 0.0), (0.0, -0.5e-3), (0.4e-3, 0.4e-3)]
+)
+def test_ghost_makes_iso_widths_larger(offset_x_m: float, offset_y_m: float) -> None:
+    pixel = NOISELESS.pixel_size_m
+    clean = measure_widths(_frame(), pixel)
+    ghosted = measure_widths(
+        _frame(Ghost(relative_power=0.1, offset_x_m=offset_x_m, offset_y_m=offset_y_m)),
+        pixel,
+    )
+    if offset_x_m:
+        assert ghosted.d_x_m > 1.01 * clean.d_x_m
+    if offset_y_m:
+        assert ghosted.d_y_m > 1.01 * clean.d_y_m
+    if not offset_x_m:
+        assert ghosted.d_x_m == pytest.approx(clean.d_x_m, rel=2e-3)
+
+
+def test_ghost_only_inside_its_z_window_and_offset_follows_z() -> None:
+    ghost = Ghost(
+        relative_power=0.2,
+        offset_x_m=0.1e-3,
+        offset_y_m=0.0,
+        offset_x_per_m=2e-3,  # +2 um per mm of z
+        z_min_m=0.20,
+        z_max_m=0.30,
+    )
+    assert np.array_equal(_frame(ghost, z_m=0.15), _frame(None, z_m=0.15))
+    assert not np.array_equal(_frame(ghost, z_m=0.25), _frame(None, z_m=0.25))
+    assert ghost.offset_at(0.25) == pytest.approx((0.1e-3 + 0.5e-3, 0.0))
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"relative_power": 0.0},
+        {"relative_power": 0.1, "size_factor": 0.0},
+        {"relative_power": 0.1, "z_min_m": 0.2, "z_max_m": 0.1},
+    ],
+)
+def test_ghost_rejects_bad_parameters(kwargs) -> None:
+    with pytest.raises(ValueError):
+        Ghost(offset_x_m=0.0, offset_y_m=0.0, **kwargs)
