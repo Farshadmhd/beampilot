@@ -529,6 +529,30 @@ def test_only_the_two_latest_images_are_resent() -> None:
     assert sum(isinstance(o["output"], list) for o in _outputs(client.requests[3])) == 2
 
 
+def test_images_of_one_batched_turn_all_reach_the_model() -> None:
+    client = FakeClient(
+        [
+            _response(
+                _call("measure_at", z_mm=100.0, exposure_ms=1.5),
+                _call("measure_at", z_mm=120.0, exposure_ms=1.5),
+                _call("measure_at", z_mm=140.0, exposure_ms=1.5),
+            ),
+            _response(
+                _call("view_frame", measurement_id="m1"),
+                _call("view_frame", measurement_id="m2"),
+                _call("view_frame", measurement_id="m3"),
+            ),
+            _response(_call("get_setup")),
+            _response(_call("finish", verdict="measurement_failed", explanation="x")),
+        ]
+    )
+    run_agent(_session(), client)
+    # All three images of the batched turn are sent once ...
+    assert sum(isinstance(o["output"], list) for o in _outputs(client.requests[2])) == 3
+    # ... and only later the oldest becomes a stub.
+    assert sum(isinstance(o["output"], list) for o in _outputs(client.requests[3])) == 2
+
+
 def test_view_frame_can_be_switched_off_for_the_ablation() -> None:
     client = FakeClient(
         [
@@ -547,8 +571,8 @@ def test_view_frame_can_be_switched_off_for_the_ablation() -> None:
     assert "# How to work" in request["instructions"]
     assert "views_left" not in run.steps[0]["tool_calls"][0]["result"]
     refused = run.steps[1]["tool_calls"][0]["result"]
-    assert (
-        "unknown tool" in refused["error"] and "view_frame" not in refused["error"][20:]
-    )
+    offered = refused["error"].split("tools: ")[1].split(", ")
+    assert "unknown tool 'view_frame'" in refused["error"]
+    assert "view_frame" not in offered and "measure_at" in offered
     assert session.views_used == 0
     assert "Looking at frames" in system_prompt()
