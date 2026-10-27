@@ -152,10 +152,10 @@ class Measurement:
 class MeasurementSession:
     """State of one run: hidden beam, darks, faults, measurements and log.
 
-    The ``N_DARK_FRAMES`` dark frames are taken at construction, with the faults that
-    are active at the start, like a lab run that blocks the beam before it
-    begins. They are never retaken, so a later background change shows up
-    as a residual offset.
+    ``N_DARK_FRAMES`` dark frames are taken at construction, with the faults
+    that are active at the start, like a lab run that blocks the beam before
+    it begins. Until :meth:`retake_darks` is called, a later background
+    change shows up as a residual offset.
 
     Parameters
     ----------
@@ -169,11 +169,10 @@ class MeasurementSession:
         self.measurements: dict[str, Measurement] = {}
         self.log: list[dict[str, Any]] = []
         self.report: dict[str, Any] | None = None
+        self.positions_used = 0
+        self.dark_sets_taken = 0
         self._rng = np.random.default_rng(scenario.seed)
-        dark_camera = self._camera_with_faults()
-        self.dark_mean: NDArray[np.float64] = mean_dark(
-            [dark_frame(dark_camera, self._rng) for _ in range(N_DARK_FRAMES)]
-        )
+        self.dark_mean = self._take_dark_set()
 
     @property
     def camera(self) -> CameraConfig:
@@ -187,8 +186,8 @@ class MeasurementSession:
 
     @property
     def positions_left(self) -> int:
-        """Remaining ``measure_at`` budget."""
-        return self.scenario.max_positions - len(self.measurements)
+        """Remaining budget; each measurement and each dark retake costs one."""
+        return self.scenario.max_positions - self.positions_used
 
     @property
     def finished(self) -> bool:
@@ -243,13 +242,28 @@ class MeasurementSession:
             for _ in range(self.scenario.repeats)
         ]
 
+    def retake_darks(self) -> None:
+        """Take a fresh dark set with the current faults; costs one position.
+
+        Any extra background active now (e.g. room light) becomes part of the
+        dark, so the corner offset of later frames is back near zero.
+        """
+        self.dark_mean = self._take_dark_set()
+        self.positions_used += 1
+
     def add_measurement(self, measurement: Measurement) -> None:
-        """Store a measurement under its id."""
+        """Store a measurement under its id; costs one position."""
         self.measurements[measurement.measurement_id] = measurement
+        self.positions_used += 1
 
     def next_measurement_id(self) -> str:
         """Identifier for the next measurement: ``"m1"``, ``"m2"``, ..."""
         return f"m{len(self.measurements) + 1}"
+
+    def _take_dark_set(self) -> NDArray[np.float64]:
+        camera = self._camera_with_faults()
+        self.dark_sets_taken += 1
+        return mean_dark([dark_frame(camera, self._rng) for _ in range(N_DARK_FRAMES)])
 
     def _camera_with_faults(self) -> CameraConfig:
         camera = self.scenario.camera

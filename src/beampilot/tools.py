@@ -1,4 +1,4 @@
-"""The five agent tools (design section 4), as plain functions on a session.
+"""The six agent tools (design section 4), as plain functions on a session.
 
 Every tool takes a required `reason` (``finish`` uses its `explanation`),
 returns a JSON-serialisable dict, and never raises on bad input: it returns
@@ -18,7 +18,7 @@ from typing import Any
 import numpy as np
 
 from beampilot.caustic import CausticFit, coverage, fit_caustic, general_astigmatism
-from beampilot.session import Measurement, MeasurementSession
+from beampilot.session import N_DARK_FRAMES, Measurement, MeasurementSession
 from beampilot.widths import measure_widths, subtract_background, width_statistics
 
 # Quality-flag thresholds.
@@ -277,6 +277,38 @@ def measure_at(
         "reasons": reasons,
         "warnings": warnings,
         "details": details,
+    }
+
+
+@_tool()
+def retake_darks(session: MeasurementSession, reason: str) -> dict[str, Any]:
+    """Block the beam and take a fresh dark set with the current background.
+
+    Use it when ``background_changed`` fires, e.g. after room light was
+    switched on: the new background becomes part of the dark frames. Costs
+    one position from the budget.
+
+    Parameters
+    ----------
+    session : MeasurementSession
+        The run.
+    reason : str
+        Why.
+
+    Returns
+    -------
+    dict
+        Number of dark frames, dark sets taken so far, mean of the new dark
+        in counts, and positions left.
+    """
+    if session.positions_left <= 0:
+        raise ToolInputError("position budget used up; call evaluate and finish")
+    session.retake_darks()
+    return {
+        "dark_frames": N_DARK_FRAMES,
+        "dark_sets_taken": session.dark_sets_taken,
+        "mean_dark_counts": _num(session.dark_mean.mean(), 2),
+        "positions_left": session.positions_left,
     }
 
 

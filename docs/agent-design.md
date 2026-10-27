@@ -1,7 +1,7 @@
 # BeamPilot agent design (v1)
 
 Status: v1, agreed 26 Oct 2026.
-Updated 26 Oct 2026. All data is simulated. No lab data, no code from other projects.
+Updated 27 Oct 2026 (added `retake_darks`). All data is simulated. No lab data, no code from other projects.
 
 ## 1. Goal and pitch
 
@@ -35,7 +35,7 @@ The model chooses the order of actions; the controller only enforces limits.
   easier for the model to read. Conversion happens only at the tool boundary.
 - A known-answer test checks M² end to end, so a unit error (for example a factor 10³) fails.
 
-## 4. Tools (5 core)
+## 4. Tools (6 core)
 
 Every tool has a required `reason` string. Tool schemas are strict, and verdicts are enums.
 
@@ -63,6 +63,10 @@ Every tool has a required `reason` string. Tool schemas are strict, and verdicts
    - Python builds the report numbers from stored state. The model writes only the verdict and the text.
    - Guardrail: if the model claims `iso_compliant` but `evaluate` says coverage is not met,
      the controller returns an error and the agent must continue or choose another verdict.
+6. `retake_darks(reason)`
+   - Blocks the beam and takes a fresh dark set (50 frames) with the current background, so a
+     background change (e.g. room light switched on) becomes part of the dark.
+   - Costs one position from the budget. Use it when `measure_at` reports `background_changed`.
 
 Stretch tools (only after the core works): `change_lens(f_mm, reason)` for an inaccessible
 waist (ISO uses an artificial waist made with an aberration-free lens, and M² stays the same),

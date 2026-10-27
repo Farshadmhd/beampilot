@@ -96,3 +96,12 @@ uncertainty cannot see it. With 10 darks (5 counts read noise) the M² scatter
 between 12 simulated clean runs was 0.47 % against a reported 0.17 %. With 50 darks
 it is 0.13–0.14 % against a reported 0.15 %, the same as with a perfect dark. Cost:
 40 more frames once per dark set. ISO/TR 11146-3's minimum of 10 is still met.
+
+## 2026-10-27: New tool retake_darks (6 core tools)
+
+A background change after the dark frames (room light) was detected by
+`background_changed` but the agent could not act on it. `retake_darks` blocks the
+beam and takes a fresh 50-frame dark set with the current background, so the change
+becomes part of the dark. It costs one position from the budget, like a measurement,
+so retaking darks is a real trade-off and cannot be used for free after every frame.
+Design section 4 now lists 6 core tools.

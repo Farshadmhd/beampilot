@@ -19,7 +19,14 @@ from beampilot.session import (
     waist_outside_range_scenario,
 )
 from beampilot.simulator import beam_diameter, rayleigh_length
-from beampilot.tools import evaluate, finish, get_setup, measure_at, set_status
+from beampilot.tools import (
+    evaluate,
+    finish,
+    get_setup,
+    measure_at,
+    retake_darks,
+    set_status,
+)
 from beampilot.widths import Roi, WidthResult
 
 REASON = "test"
@@ -248,6 +255,33 @@ def test_room_light_fault_fires_background_changed() -> None:
     # The corner offset still removes a uniform background: widths stay right.
     assert after["suggested_verdict"] == "accept"
     assert after["d_x_um"]["mean"] == pytest.approx(200.0, rel=0.02)
+
+
+def test_retake_darks_clears_background_changed() -> None:
+    session = MeasurementSession(background_drift_scenario())
+    z_mm = 120.0
+    for _ in range(5):  # room light switches on before the 5th measurement
+        flagged = measure_at(session, z_mm, _exposure_ms(session, z_mm), REASON)
+    assert flagged["flags"]["background_changed"]
+    left_before = session.positions_left
+
+    retake = retake_darks(session, "room light changed the background")
+    _assert_json(retake)
+    assert retake["dark_frames"] == 50
+    assert retake["dark_sets_taken"] == 2
+    assert retake["mean_dark_counts"] == pytest.approx(103.0, abs=0.1)
+    assert retake["positions_left"] == left_before - 1
+
+    after = measure_at(session, z_mm, _exposure_ms(session, z_mm), REASON)
+    assert not after["flags"]["background_changed"]
+    assert after["details"]["residual_offset_counts"] == pytest.approx(0.0, abs=0.3)
+
+
+def test_retake_darks_needs_budget() -> None:
+    session = MeasurementSession(replace(clean_scenario(), max_positions=1))
+    assert "error" not in retake_darks(session, REASON)
+    assert "budget" in retake_darks(session, REASON)["error"]
+    assert "budget" in measure_at(session, 120.0, 1.5, REASON)["error"]
 
 
 def test_controller_can_switch_room_light_on() -> None:
