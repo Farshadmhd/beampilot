@@ -15,6 +15,8 @@ import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
 MIN_DARK_FRAMES = 10
+# Corner patch size for the fine offset, as a fraction of the image size.
+DEFAULT_CORNER_FRACTION = 0.035
 # Pixels above this fraction of the peak (1/e²) define the first integration
 # area; they only choose where the ISO iteration starts.
 START_THRESHOLD = np.exp(-2.0)
@@ -82,7 +84,7 @@ def mean_dark(dark_frames: Sequence[ArrayLike] | NDArray) -> NDArray[np.float64]
 def subtract_background(
     frame: ArrayLike,
     dark_mean: ArrayLike,
-    corner_fraction: float = 0.035,
+    corner_fraction: float = DEFAULT_CORNER_FRACTION,
 ) -> tuple[NDArray[np.float64], BackgroundInfo]:
     """Subtract the mean dark frame and the residual corner offset.
 

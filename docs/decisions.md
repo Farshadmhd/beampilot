@@ -87,3 +87,32 @@ std gives one position several times the weight. In a test with 2 % noise per fr
 5 repeats at 10 ISO positions and 300 seeds, the weighted fit's M² scattered by
 0.0080 against 0.0068 unweighted (~18 % noisier), with no bias in either. The
 weighted option stays in `fit_caustic` for callers with better std estimates.
+
+## 2026-10-27: 50 dark frames per dark set
+
+The mean dark is subtracted from every frame of a run, so its fixed pixel noise is
+the same error at every stage position; the caustic fit's residual-based
+uncertainty cannot see it. With 10 darks (5 counts read noise) the M² scatter
+between 12 simulated clean runs was 0.47 % against a reported 0.17 %. With 50 darks
+it is 0.13–0.14 % against a reported 0.15 %, the same as with a perfect dark. Cost:
+40 more frames once per dark set. ISO/TR 11146-3's minimum of 10 is still met.
+
+## 2026-10-27: New tool retake_darks (6 core tools)
+
+A background change after the dark frames (room light) was detected by
+`background_changed` but the agent could not act on it. `retake_darks` blocks the
+beam and takes a fresh 50-frame dark set with the current background, so the change
+becomes part of the dark. It costs one position from the budget, like a measurement,
+so retaking darks is a real trade-off and cannot be used for free after every frame.
+Design section 4 now lists 6 core tools.
+
+## 2026-10-27: Reject on estimated clipping loss, not on a cut integration area
+
+`measure_at` used to suggest "reject" whenever the 3 · d integration area hit the
+sensor edge. That cuts the beam at >= 6σ on one side, which biases d by far less than
+0.1 %, so it was much stricter than the ISO 11146-1 rule (power outside the sensor
+below 1 %). Now `clipping_loss` estimates the power of a Gaussian with the measured
+centroid and σ = d/4 that falls outside the sensor (erf), and only a loss above 1 %
+suggests "reject"; `roi_clipped` remains as a warning. The widths of a clipped beam
+are themselves biased low (σ ~3.6 % low when cut at ±2.6σ), so the estimate
+understates the loss by up to ~25 % near the 1 % limit.
