@@ -13,11 +13,16 @@ any API call. Only simulated data is ever sent.
 
 Limits: per browser tab (runs, tokens, one run at a time) and process-wide
 (concurrent runs, total runs and tokens since start). Per-tab limits reset when
-the page is reloaded; the process-wide caps are the real guard.
+the page is reloaded; the process-wide caps are the real guard. For public
+hosting, set the process-wide token cap with the environment variable
+``BEAMPILOT_TOKEN_CAP`` (tokens; default 60,000,000, about $20 at the token mix
+of our agent runs). When it is reached, live runs stop and the page says so;
+replay keeps working.
 """
 
 # No "from __future__ import annotations" here: Gradio inspects the handlers'
 # annotations to inject gr.Request, which needs real classes, not strings.
+import os
 import queue
 import threading
 import time
@@ -55,13 +60,30 @@ SESSION_TOKEN_BUDGET = 2_000_000
 # Process-wide caps: they hold across reloads, tabs and invented session ids.
 MAX_CONCURRENT_RUNS = 2
 GLOBAL_MAX_RUNS = 50
-GLOBAL_TOKEN_BUDGET = 20_000_000
+# About $20: agent runs cost ~$0.34 per million tokens (input + output) with
+# ~90 % of the input cached; without caching it would be up to ~$75.
+DEFAULT_TOKEN_CAP = 60_000_000
+TOKEN_CAP_ENV = "BEAMPILOT_TOKEN_CAP"
 RUN_TIMEOUT_S = 15 * 60
 EVENT_POLL_S = 0.25
 MAX_SEED = 1_000_000
 MAX_UPLOAD = "5mb"
 # Uploaded runs may only describe a camera up to this size (replay frames).
 MAX_REPLAY_PIXELS = 1024
+
+
+def token_cap_from_env() -> int:
+    """Process-wide token cap from ``BEAMPILOT_TOKEN_CAP``, else the default."""
+    value = os.environ.get(TOKEN_CAP_ENV, "").strip().replace("_", "")
+    try:
+        cap = int(value)
+    except ValueError:
+        return DEFAULT_TOKEN_CAP
+    return cap if cap > 0 else DEFAULT_TOKEN_CAP
+
+
+GLOBAL_TOKEN_BUDGET = token_cap_from_env()
+ISO_POINTS = 5  # per axis: near (within 1 zR) and far (beyond 2 zR)
 
 
 class GlobalBudget:
@@ -155,11 +177,160 @@ def scenario_choices() -> list[str]:
 def budget_text(state: RunState) -> str:
     left = "?" if state.positions_left is None else state.positions_left
     total = "?" if state.max_positions is None else state.max_positions
-    return (
+    text = (
         f"**Positions left:** {left} / {total}  ·  **model calls:** "
         f"{state.model_calls}  ·  **tokens:** {state.total_tokens:,}  ·  "
-        f"**est. cost:** ${state.cost_usd:.3f}"
+        f"**est. cost:** ${state.cost_usd:.3f}\n\n{coverage_text(state)}"
     )
+    cap = cap_text()
+    return f"{text}\n\n{cap}" if cap else text
+
+
+def coverage_text(state: RunState) -> str:
+    """Live ISO point count per axis against the 5 near + 5 far target."""
+    counts = state.coverage()
+    if counts is None:
+        return "**ISO coverage:** counted after the first fit (`evaluate`)."
+
+    def count(n: int) -> str:
+        return f"{'✅' if n >= ISO_POINTS else '⏳'} {n}/{ISO_POINTS}"
+
+    parts = [
+        f"**{axis}** near {count(near)}, far {count(far)}"
+        for axis, (near, far) in counts.items()
+    ]
+    return "**ISO coverage** (accepted points, latest fit): " + "  ·  ".join(parts)
+
+
+def cap_text() -> str:
+    """Notice shown when the process-wide token cap is used up, else ""."""
+    if _GLOBAL.tokens_left() > 0:
+        return ""
+    return (
+        f"⛔ **Live runs are paused:** this server's token cap "
+        f"({GLOBAL_TOKEN_BUDGET:,} tokens) is used up. Replay still works."
+    )
+
+
+VERDICT_ICONS = {
+    "iso_compliant": "✅",
+    "estimate_not_compliant": "⚠️",
+    "waist_not_accessible": "🚫",
+    "general_astigmatism_out_of_scope": "🚫",
+    "measurement_failed": "❌",
+}
+
+
+def results_card(state: RunState) -> str:
+    """Verdict, M² ± sigma per axis, positions and cost of the finished run."""
+    report = state.report
+    if not isinstance(report, dict) or "verdict" not in report:
+        return ""
+    verdict = str(report["verdict"])
+    icon = VERDICT_ICONS.get(verdict, "")
+    lines = [f"### {icon} {verdict}" if icon else f"### {verdict}"]
+    evaluation = report.get("evaluation")
+    evaluation = evaluation if isinstance(evaluation, dict) else {}
+    rows = []
+    for axis in ("x", "y"):
+        fit = evaluation.get(axis)
+        if not isinstance(fit, dict):
+            continue
+        if not _is_number(fit.get("m2")):
+            rows.append(f"| {axis} | not determined | – | – |")
+            continue
+        sigma = fit.get("m2_std")
+        m2 = f"{fit['m2']:.3f}" + (f" ± {sigma:.3f}" if _is_number(sigma) else "")
+        rows.append(
+            f"| {axis} | **{m2}** | {_shown(fit.get('d0_um'), '.1f')} µm | "
+            f"{_shown(fit.get('z0_mm'), '.1f')} mm |"
+        )
+    if rows:
+        lines += ["", "| Axis | M² | Waist d0 | Waist z0 |", "|---|---|---|---|", *rows]
+    used = (
+        state.max_positions - state.positions_left
+        if state.max_positions is not None and state.positions_left is not None
+        else report.get("positions_measured", "?")
+    )
+    lines += [
+        "",
+        f"**Positions:** {used} used ({report.get('positions_accepted', '?')} "
+        f"accepted, {report.get('positions_rejected', '?')} rejected)  ·  "
+        f"**model calls:** {state.model_calls}  ·  "
+        f"**est. cost:** ${state.cost_usd:.3f}",
+    ]
+    if report.get("stopped_by_limit"):
+        lines.append(f"\n_Stopped by the controller: {report['stopped_by_limit']}_")
+    if report.get("explanation"):
+        lines.append(f"\n> {report['explanation']}")
+    return "\n".join(lines)
+
+
+# (label, truth key, unit, error kind) per row of the truth table.
+TRUTH_ROWS = (
+    ("Waist diameter d0", "d0_{}_um", "µm", "pct"),
+    ("Waist position z0", "z0_{}_mm", "mm", "diff"),
+    ("Rayleigh length zR", "z_r_{}_mm", "mm", "pct"),
+    ("M²", "m2_{}", "", "pct"),
+)
+MEASURED_KEYS = {
+    "d0_{}_um": "d0_um",
+    "z0_{}_mm": "z0_mm",
+    "z_r_{}_mm": "z_r_mm",
+    "m2_{}": "m2",
+}
+
+
+def truth_table(report: Any, truth: Any) -> str:
+    """Measured against true values per axis, with the error in %.
+
+    The waist position error is given in mm (a % of a stage position means
+    nothing). Hidden faults of the scenario are listed below the table.
+    """
+    if not isinstance(truth, dict):
+        return "_No ground truth for this run._"
+    evaluation = report.get("evaluation") if isinstance(report, dict) else None
+    evaluation = evaluation if isinstance(evaluation, dict) else {}
+    lines = [
+        f"**Ground truth: {truth.get('scenario', '?')}**",
+        "",
+        "| Quantity | Axis | Measured | True | Error |",
+        "|---|---|---|---|---|",
+    ]
+    for label, key, unit, kind in TRUTH_ROWS:
+        for axis in ("x", "y"):
+            true = truth.get(key.format(axis))
+            fit = evaluation.get(axis)
+            measured = fit.get(MEASURED_KEYS[key]) if isinstance(fit, dict) else None
+            error = ""
+            if _is_number(measured) and _is_number(true) and true:
+                error = (
+                    f"{(measured / true - 1) * 100:+.1f} %"
+                    if kind == "pct"
+                    else f"{measured - true:+.2f} mm"
+                )
+            shown = (
+                f"{measured:.3f} {unit}".strip()
+                if _is_number(measured)
+                else "not determined"
+            )
+            true_shown = f"{_shown(true, '.3f')} {unit}".strip()
+            lines.append(f"| {label} | {axis} | {shown} | {true_shown} | {error} |")
+    standard = {"scenario", "wavelength_nm"} | {
+        key.format(axis) for _, key, _, _ in TRUTH_ROWS for axis in ("x", "y")
+    }
+    extras = [f"- **{k}:** {v}" for k, v in truth.items() if k not in standard]
+    if extras:
+        lines += ["", "Hidden in this scenario:", *extras]
+    return "\n".join(lines)
+
+
+def _is_number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _shown(value: Any, spec: str) -> str:
+    return format(value, spec) if _is_number(value) else "–"
 
 
 def fault_line(event: dict[str, Any]) -> str:
@@ -228,6 +399,7 @@ def build_app():
             "# BeamPilot\nAn agent (Muse Spark) measures laser beam M² to "
             "ISO 11146 on a simulated camera and stage. All data is simulated."
         )
+        cap_banner = gr.Markdown()
         with gr.Tab("Live run"):
             with gr.Row():
                 scenario = gr.Dropdown(
@@ -249,12 +421,13 @@ def build_app():
                 fault_status = gr.Markdown()
             live_budget = gr.Markdown()
             with gr.Row():
-                live_plot = gr.Plot(label="Caustic")
-                live_frame = gr.Image(label="Latest frame", height=300)
+                live_plot = gr.Plot(label="Caustic", scale=3)
+                live_frame = gr.Image(label="Latest frame", height=420, scale=2)
             live_log = gr.Markdown(label="Decision log")
+            live_card = gr.Markdown()
             live_report = gr.JSON(label="Report")
             live_reveal = gr.Button("Reveal truth")
-            live_truth = gr.JSON(label="Ground truth")
+            live_truth = gr.Markdown()
 
         with gr.Tab("Replay"):
             with gr.Row():
@@ -270,12 +443,15 @@ def build_app():
             replay_title = gr.Markdown()
             replay_budget = gr.Markdown()
             with gr.Row():
-                replay_plot = gr.Plot(label="Caustic")
-                replay_image = gr.Image(label="Latest frame (re-simulated)", height=300)
+                replay_plot = gr.Plot(label="Caustic", scale=3)
+                replay_image = gr.Image(
+                    label="Latest frame (re-simulated)", height=420, scale=2
+                )
             replay_log = gr.Markdown(label="Decision log")
+            replay_card = gr.Markdown()
             replay_report = gr.JSON(label="Report")
             replay_reveal = gr.Button("Reveal truth")
-            replay_truth = gr.JSON(label="Ground truth")
+            replay_truth = gr.Markdown()
             replay_run = gr.State(None)
 
         # Gradio passes the browser session only to parameters typed gr.Request.
@@ -289,7 +465,7 @@ def build_app():
             return inject_fault(request, "laser_power")
 
         def reveal(request: gr.Request):
-            return reveal_live(request)
+            return reveal_live_table(request)
 
         def tab_closed(request: gr.Request) -> None:
             _forget_browser(request)
@@ -304,6 +480,7 @@ def build_app():
                 live_frame,
                 live_budget,
                 live_log,
+                live_card,
                 live_report,
                 live_truth,
             ],
@@ -321,6 +498,7 @@ def build_app():
                 replay_image,
                 replay_budget,
                 replay_log,
+                replay_card,
                 replay_report,
                 replay_truth,
                 replay_run,
@@ -328,17 +506,18 @@ def build_app():
             **private,
         )
         replay_reveal.click(
-            lambda run: run.truth if run else None,
+            lambda run: truth_table(run.data.get("report"), run.truth) if run else "",
             replay_run,
             replay_truth,
             **private,
         )
+        app.load(cap_text, None, cap_banner, **private)
         app.unload(tab_closed)
     return app
 
 
 def _message(text: str) -> tuple:
-    return (None, None, text, "", None, None)
+    return (None, None, text, "", "", None, "")
 
 
 def live_run(scenario_name: str, seed: float, note: str, request: Any = None):
@@ -524,8 +703,9 @@ def _live_update(state: RunState, session: MeasurementSession, stage):
         image,
         budget_text(state),
         log_text(state),
+        results_card(state),
         state.report,
-        None,  # truth stays hidden until "Reveal truth"
+        "",  # truth stays hidden until "Reveal truth"
     )
 
 
@@ -554,35 +734,29 @@ def reveal_live(request: Any = None) -> dict[str, Any]:
     return reveal_truth(session)
 
 
+def reveal_live_table(request: Any = None) -> str:
+    """The ground truth as a measured-vs-true table, after the run."""
+    truth = reveal_live(request)
+    if "message" in truth:
+        return f"_{truth['message']}_"
+    return truth_table(_browser(request).session.report, truth)
+
+
 def replay(saved: str | None, upload: Any, seconds_per_step: float):
     """Play a saved run step by step (generator); no API calls."""
     path = getattr(upload, "name", upload) if upload else None
     path = path or (REPO_ROOT / saved if saved else None)
     if not path:
-        yield (
-            "Choose a saved run or upload one.",
-            None,
-            None,
-            "",
-            "",
-            None,
-            None,
-            None,
-        )
+        yield _replay_message("Choose a saved run or upload one.")
         return
     try:
         yield from _replay(load_run(path), seconds_per_step)
     except Exception as exc:  # noqa: BLE001 - an uploaded file may contain anything
-        yield (
-            f"Cannot replay this file ({type(exc).__name__}).",
-            None,
-            None,
-            "",
-            "",
-            None,
-            None,
-            None,
-        )
+        yield _replay_message(f"Cannot replay this file ({type(exc).__name__}).")
+
+
+def _replay_message(text: str) -> tuple:
+    return (text, None, None, "", "", "", None, "", None)
 
 
 def _replay(run: SavedRun, seconds_per_step: float):
@@ -613,8 +787,9 @@ def _replay(run: SavedRun, seconds_per_step: float):
             replay_frame(run, state),
             budget_text(state),
             log_text(state),
+            results_card(state),
             state.report,
-            None,
+            "",
             run,
         )
         time.sleep(float(np.clip(seconds_per_step, 0.0, 2.0)))
@@ -627,8 +802,9 @@ def _replay(run: SavedRun, seconds_per_step: float):
         replay_frame(run, state),
         budget_text(state),
         log_text(state),
+        results_card(state),
         state.report,
-        None,
+        "",
         run,
     )
 

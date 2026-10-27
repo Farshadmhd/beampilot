@@ -88,10 +88,11 @@ def test_caustic_figure_and_frame_image(saved_run) -> None:
 
 def test_replay_generator_ends_with_the_report(saved_run) -> None:
     updates = list(demo_app.replay(None, str(saved_run), 0.0))
-    title, plot, image, budget, log, report, truth, run = updates[-1]
+    title, plot, image, budget, log, card, report, truth, run = updates[-1]
     assert "Replay" in title
     assert report["verdict"] == "estimate_not_compliant"
-    assert truth is None  # only shown after "Reveal truth"
+    assert "estimate_not_compliant" in card
+    assert truth == ""  # only shown after "Reveal truth"
     assert run.truth["m2_x"] == 1.2
     assert image is not None and image.shape[2] == 3  # re-simulated frame
 
@@ -100,7 +101,9 @@ def test_replay_logs_fault_events() -> None:
     path = demo_app.DEMO_RUNS_DIR / "clean_room_light_live.json"
     if not path.exists():
         pytest.skip("demo run not shipped")
-    *_, log, _report, _truth, _run = list(demo_app.replay(None, str(path), 0.0))[-1]
+    *_, log, _card, _report, _truth, _run = list(demo_app.replay(None, str(path), 0.0))[
+        -1
+    ]
     assert "💡 **Fault (operator button)** from measurement 6" in log
 
 
@@ -116,14 +119,17 @@ def test_live_run_streams_and_reveals_after_the_end(monkeypatch, tmp_path) -> No
     request = SimpleNamespace(session_hash="test-live")
     demo_app._BROWSERS.pop("test-live", None)
     updates = list(demo_app.live_run("clean", 0, "", request))
-    plot, image, budget, log, report, truth = updates[-1]
+    plot, image, budget, log, card, report, truth = updates[-1]
     assert report["verdict"] == "estimate_not_compliant"
+    assert "M²" in card and "Positions:** 5 used" in card
     assert image is not None
     assert "Positions left:** 15" in budget
     assert "Saved as" in log
     assert list(tmp_path.glob("*.json"))
     revealed = demo_app.reveal_live(request)
     assert revealed["m2_x"] == 1.2
+    table = demo_app.reveal_live_table(request)
+    assert "| M² | x |" in table and "| 1.200 |" in table
     assert "No run in progress" in demo_app.inject_fault(request, "room_light")
 
 
@@ -239,7 +245,7 @@ def test_exception_outside_the_agent_loop_still_reports(monkeypatch, tmp_path) -
     monkeypatch.setattr(demo_app, "LIVE_RUNS_DIR", tmp_path)
     request = SimpleNamespace(session_hash="test-broken")
     demo_app._BROWSERS.pop("test-broken", None)
-    *_, (plot, image, budget, log, report, truth) = demo_app.live_run(
+    *_, (plot, image, budget, log, card, report, truth) = demo_app.live_run(
         "clean", 0, "", request
     )
     assert report["verdict"] == "measurement_failed"
@@ -281,7 +287,7 @@ def test_bad_uploads_give_a_message_not_a_crash(saved_run, tmp_path) -> None:
     huge_path.write_text(json.dumps(huge), "utf-8")
     last = list(demo_app.replay(None, str(huge_path), 0.0))[-1]
     assert last[2] is None  # no frame rendered
-    assert last[5]["verdict"] == "estimate_not_compliant"
+    assert last[6]["verdict"] == "estimate_not_compliant"
 
 
 @pytest.mark.parametrize(
@@ -326,3 +332,94 @@ def test_bad_seed_or_scenario_is_refused() -> None:
     request = SimpleNamespace(session_hash="test-input")
     assert "between 0 and" in next(demo_app.live_run("clean", -3, "", request))[2]
     assert "Unknown scenario" in next(demo_app.live_run("nope", 0, "", request))[2]
+
+
+# Video polish: grouped status lines, coverage, results card, truth table, cap
+
+
+def test_consecutive_set_status_calls_share_one_log_line(saved_run) -> None:
+    state = _play(load_run(saved_run))
+    status_lines = [line for line in state.log if line.startswith("**set_status**")]
+    assert len(status_lines) == 1
+    assert status_lines[0].count("✅") == 5 and "m5 ✅" in status_lines[0]
+    # A different call in between starts a new line.
+    state.apply_tool_call({"name": "get_setup", "arguments": {}, "result": {}})
+    state.apply_tool_call(
+        {
+            "name": "set_status",
+            "arguments": {"measurement_id": "m1", "reason": "bad"},
+            "result": {"measurement_id": "m1", "status": "reject"},
+        }
+    )
+    assert state.log[-1] == "**set_status**: m1 ❌ bad"
+
+
+def test_coverage_counts_accepted_points_against_the_latest_fit() -> None:
+    state = RunState()
+    assert state.coverage() is None
+    assert "after the first fit" in demo_app.coverage_text(state)
+    for i, z in enumerate((100.0, 120.0, 130.0, 60.0, 190.0, 200.0), start=1):
+        state.apply_tool_call(
+            {
+                "name": "measure_at",
+                "arguments": {},
+                "result": {
+                    "measurement_id": f"m{i}",
+                    "z_mm": z,
+                    "exposure_ms": 1.0,
+                    "d_x_um": {"mean": 300.0},
+                    "d_y_um": {"mean": 300.0},
+                },
+            }
+        )
+    fit = {"z0_mm": 120.0, "z_r_mm": 25.0, "m2": 1.2}
+    state.evaluation = {"status": "ok", "x": fit, "y": dict(fit, z_r_mm=40.0)}
+    for i in (1, 2, 3, 4, 5):
+        state.points[f"m{i}"].status = "accept"
+    # x: near 100, 120, 130; far 60, 190 (>= 50 mm away). y (zR 40): none >= 80.
+    assert state.coverage() == {"x": (3, 2), "y": (3, 0)}
+    text = demo_app.coverage_text(state)
+    assert "**x** near ⏳ 3/5, far ⏳ 2/5" in text
+
+
+def test_results_card_and_truth_table_handle_missing_values() -> None:
+    state = RunState(max_positions=20, positions_left=8, cost_usd=0.1234)
+    state.report = {
+        "verdict": "estimate_not_compliant",
+        "explanation": "budget ran out",
+        "positions_accepted": 10,
+        "positions_rejected": 2,
+        "evaluation": {
+            "status": "ok",
+            "x": {"m2": 1.21, "m2_std": 0.004, "d0_um": 201.0, "z0_mm": 119.5},
+            "y": {"m2": None},
+        },
+    }
+    card = demo_app.results_card(state)
+    assert "⚠️ estimate_not_compliant" in card
+    assert "**1.210 ± 0.004**" in card and "| y | not determined" in card
+    assert "**Positions:** 12 used (10 accepted, 2 rejected)" in card
+    assert "$0.123" in card
+    truth = {"scenario": "clean", "m2_x": 1.2, "m2_y": 1.25, "z0_x_mm": 120.0}
+    truth["ghost"] = "15% power"
+    table = demo_app.truth_table(state.report, truth)
+    assert "| M² | x | 1.210 | 1.200 | +0.8 % |" in table
+    assert "| M² | y | not determined | 1.250 |" in table
+    assert "| Waist position z0 | x | 119.500 mm | 120.000 mm | -0.50 mm |" in table
+    assert "- **ghost:** 15% power" in table
+    assert demo_app.results_card(RunState()) == ""
+    assert "No ground truth" in demo_app.truth_table(None, None)
+
+
+def test_token_cap_is_configurable_and_shown_when_reached(monkeypatch) -> None:
+    monkeypatch.setenv("BEAMPILOT_TOKEN_CAP", "1_000")
+    assert demo_app.token_cap_from_env() == 1000
+    for bad in ("", "lots", "-5", "0"):
+        monkeypatch.setenv("BEAMPILOT_TOKEN_CAP", bad)
+        assert demo_app.token_cap_from_env() == demo_app.DEFAULT_TOKEN_CAP
+    assert demo_app.cap_text() == ""
+    demo_app._GLOBAL.add_tokens(demo_app.GLOBAL_TOKEN_BUDGET)
+    assert "Live runs are paused" in demo_app.cap_text()
+    assert "Live runs are paused" in demo_app.budget_text(RunState())
+    update = next(demo_app.live_run("clean", 0, "", SimpleNamespace(session_hash="c")))
+    assert "used up its token budget" in update[2]
