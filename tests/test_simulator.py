@@ -350,8 +350,10 @@ def test_hot_pixels_add_counts_to_light_frames_only() -> None:
             Aperture,
             {"radius_m": 1e-3, "z_min_m": 0, "z_max_m": 1, "center_x_m": np.nan},
         ),
+        (Aperture, {"radius_m": 1e-3, "z_min_m": 0.0, "z_max_m": np.inf}),
         (HotPixels, {"pixels": (), "extra_counts": 10.0}),
         (HotPixels, {"pixels": ((1, 1),), "extra_counts": 0.0}),
+        (HotPixels, {"pixels": ((-1, 3),), "extra_counts": 10.0}),
     ],
 )
 def test_aperture_and_hot_pixels_reject_bad_parameters(factory, kwargs) -> None:
