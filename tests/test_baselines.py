@@ -42,7 +42,7 @@ def test_scripted_waist_outside_range() -> None:
     session = MeasurementSession(waist_outside_range_scenario())
     report = scripted_iso(session)["report"]
     assert report["verdict"] == "waist_not_accessible"
-    assert not report["evaluation"]["x"]["waist_in_stage_range"]
+    assert report["evaluation"]["x"]["waist_accessibility"] == "outside"
 
 
 def test_scripted_lowers_exposure_on_saturation_and_finishes() -> None:
@@ -91,6 +91,31 @@ def test_scripted_finds_a_waist_outside_the_scout_span() -> None:
     for axis in ("x", "y"):
         m2 = report["evaluation"][axis]["m2"]
         assert m2 == pytest.approx(truth[f"m2_{axis}"], rel=0.03)
+
+
+@pytest.mark.parametrize("z0_m", [0.002, 0.248])
+def test_scripted_waist_two_mm_from_a_stage_end(z0_m: float) -> None:
+    """Scouts alone can place this waist just outside the stage; the operator
+    must measure closer to that end instead of giving up."""
+    base = clean_scenario(seed=1)
+    session = MeasurementSession(
+        replace(base, beam=replace(base.beam, z0x_m=z0_m, z0y_m=z0_m))
+    )
+    report = scripted_iso(session)["report"]
+    assert report["verdict"] == "iso_compliant"
+    for axis in ("x", "y"):
+        assert report["evaluation"][axis]["waist_accessibility"] in (
+            "inside",
+            "uncertain",
+        )
+
+
+def test_largest_gap_midpoint() -> None:
+    gap = baselines._ScriptedOperator._largest_gap_midpoint
+    # Gaps 3.2, 5.0, 7.4, 7.5, 3.9: the largest is 15.6-23.1.
+    assert gap((0.0, 27.0), [3.2, 8.2, 15.6, 23.1]) == 19.4
+    assert gap((0.0, 10.0), []) == 5.0
+    assert gap((5.0, 5.0), []) is None
 
 
 def test_scripted_remeasures_a_failed_scout_to_reach_the_waist() -> None:
@@ -182,8 +207,8 @@ def test_naive_runs_to_finish(name: str) -> None:
         (
             {
                 "status": "ok",
-                "x": {"fit_success": False, "waist_in_stage_range": None},
-                "y": {"fit_success": True, "waist_in_stage_range": True},
+                "x": {"fit_success": False, "waist_accessibility": None},
+                "y": {"fit_success": True, "waist_accessibility": "inside"},
                 "general_astigmatism": False,
                 "iso_coverage_met": False,
             },
@@ -192,8 +217,8 @@ def test_naive_runs_to_finish(name: str) -> None:
         (
             {
                 "status": "ok",
-                "x": {"fit_success": True, "waist_in_stage_range": False},
-                "y": {"fit_success": True, "waist_in_stage_range": True},
+                "x": {"fit_success": True, "waist_accessibility": "outside"},
+                "y": {"fit_success": True, "waist_accessibility": "inside"},
                 "general_astigmatism": True,
                 "iso_coverage_met": True,
             },
@@ -202,8 +227,8 @@ def test_naive_runs_to_finish(name: str) -> None:
         (
             {
                 "status": "ok",
-                "x": {"fit_success": True, "waist_in_stage_range": True},
-                "y": {"fit_success": True, "waist_in_stage_range": True},
+                "x": {"fit_success": True, "waist_accessibility": "inside"},
+                "y": {"fit_success": True, "waist_accessibility": "inside"},
                 "general_astigmatism": True,
                 "iso_coverage_met": True,
             },
@@ -212,8 +237,8 @@ def test_naive_runs_to_finish(name: str) -> None:
         (
             {
                 "status": "ok",
-                "x": {"fit_success": True, "waist_in_stage_range": True},
-                "y": {"fit_success": True, "waist_in_stage_range": True},
+                "x": {"fit_success": True, "waist_accessibility": "inside"},
+                "y": {"fit_success": True, "waist_accessibility": "inside"},
                 "general_astigmatism": False,
                 "iso_coverage_met": True,
             },
@@ -222,8 +247,8 @@ def test_naive_runs_to_finish(name: str) -> None:
         (
             {
                 "status": "ok",
-                "x": {"fit_success": True, "waist_in_stage_range": True},
-                "y": {"fit_success": True, "waist_in_stage_range": True},
+                "x": {"fit_success": True, "waist_accessibility": "inside"},
+                "y": {"fit_success": True, "waist_accessibility": "inside"},
                 "general_astigmatism": False,
                 "iso_coverage_met": False,
             },

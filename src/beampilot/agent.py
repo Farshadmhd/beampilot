@@ -284,7 +284,9 @@ def run_agent(
     Returns
     -------
     AgentRun
-        Steps, token usage, cost, stop reason and the report (if finished).
+        Steps, token usage, cost, stop reason and the report. If a hard limit
+        or an API error stops the run, the controller writes the report
+        (:func:`beampilot.tools.fallback_report`).
     """
     config = config or AgentConfig()
     run = AgentRun(config=config)
@@ -357,6 +359,10 @@ def run_agent(
         history.extend(outputs or [{"role": "user", "content": NUDGE}])
     else:
         run.stop_reason = f"model call limit reached ({config.max_model_calls})"
+    if not session.finished:
+        # The controller never trusts the agent to stop: write the report
+        # from session state with a verdict assigned by rule.
+        run.report = tools.fallback_report(session, run.stop_reason)
     return run
 
 

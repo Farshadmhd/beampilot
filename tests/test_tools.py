@@ -476,7 +476,7 @@ def test_clean_run_iso_compliant_report() -> None:
         error = axis_result["m2"] / truth[f"m2_{axis}"] - 1
         print(f"\nclean run M²{axis} {axis_result['m2']} (error {error:+.2%})")
         assert axis_result["fit_success"]
-        assert axis_result["waist_in_stage_range"]
+        assert axis_result["waist_accessibility"] == "inside"
         assert axis_result["coverage"]["compliant"]
         assert abs(error) < 0.03
         assert axis_result["z0_mm"] == pytest.approx(truth[f"z0_{axis}_mm"], abs=2.0)
@@ -503,6 +503,28 @@ def test_finish_refuses_iso_compliant_without_coverage() -> None:
     assert done["report"]["verdict"] == "estimate_not_compliant"
 
 
+@pytest.mark.parametrize(
+    ("flag", "message"),
+    [("general_astigmatism", "general astigmatism"), ("m2_below_1", "M² < 1")],
+)
+def test_finish_refuses_iso_compliant_with_a_red_flag(
+    monkeypatch, flag: str, message: str
+) -> None:
+    session = MeasurementSession(clean_scenario())
+    _measure_and_accept(session, _iso_positions_mm(session))
+    real_evaluation = tools._evaluation
+
+    def flagged(s):
+        result = real_evaluation(s)
+        result[flag] = True
+        return result
+
+    monkeypatch.setattr(tools, "_evaluation", flagged)
+    refused = finish(session, "iso_compliant", "coverage is met")
+    assert message in refused["error"]
+    assert not session.finished
+
+
 def test_finish_refuses_iso_compliant_without_data() -> None:
     session = MeasurementSession(clean_scenario())
     assert "cannot report" in finish(session, "iso_compliant", "x")["error"]
@@ -523,11 +545,12 @@ def test_waist_outside_stage_range_is_reported() -> None:
     assert result["status"] == "ok"
     for axis in ("x", "y"):
         axis_result = result[axis]
-        assert not axis_result["waist_in_stage_range"]
+        assert axis_result["waist_accessibility"] == "outside"
         # Extrapolated waist: no collapsed numbers, a reason instead.
         for key in ("m2", "d0_um", "z0_mm", "z_r_mm"):
             assert axis_result[key] is None, key
-        assert "below the measured range" in axis_result["not_determined"]
+        assert "no accepted position within ±1 zR" in axis_result["not_determined"]
+        assert "below the measured positions" in axis_result["not_determined"]
         assert axis_result["waist_side"] == "below"
         assert axis_result["theta_mrad"] > 0  # the far-field slope is measured
         assert axis_result["coverage"] is None
@@ -558,8 +581,68 @@ def test_failed_fit_shows_no_numbers() -> None:
     assert result["not_determined"] == "caustic fit failed"
     for key in ("m2", "d0_um", "z0_mm", "z_r_mm", "theta_mrad"):
         assert result[key] is None, key
-    assert result["waist_in_stage_range"] is None
+    assert result["waist_accessibility"] is None
     assert result["coverage"] is None
+
+
+def test_waist_in_a_gap_between_far_clusters_is_not_determined() -> None:
+    """Two far-field clusters on both sides: the waist lies inside the measured
+    span but no point is within +-1 zR, so the fit would extrapolate."""
+    session = MeasurementSession(clean_scenario())
+    _measure_and_accept(session, [40.0, 50.0, 60.0, 180.0, 190.0, 200.0])
+    result = evaluate(session, REASON)
+    for axis in ("x", "y"):
+        axis_result = result[axis]
+        assert axis_result["m2"] is None
+        assert axis_result["waist_side"] == "within"
+        assert axis_result["waist_gap_mm"] == [60.0, 180.0]
+        assert "in the gap between 60.0 and 180.0 mm" in axis_result["not_determined"]
+
+
+def test_scouts_near_a_waist_outside_their_span_give_numbers() -> None:
+    """Waist at 25 mm, positions from 31 mm: 31 mm is within +-1 zR (24.6 mm),
+    so the fit is determined although the waist is outside the span."""
+    base = clean_scenario()
+    beam = replace(base.beam, z0x_m=0.025, z0y_m=0.025)
+    session = MeasurementSession(replace(base, beam=beam))
+    _measure_and_accept(session, [31.25, 93.75, 156.25, 218.75])
+    result = evaluate(session, REASON)
+    for axis in ("x", "y"):
+        assert result[axis]["not_determined"] is None
+        assert result[axis]["z0_mm"] == pytest.approx(25.0, abs=5.0)
+        assert result[axis]["waist_accessibility"] == "inside"
+
+
+@pytest.mark.parametrize(
+    ("z0_mm", "z0_std_mm", "expected", "end"),
+    [
+        (120.0, 1.0, "inside", None),
+        (-50.0, 5.0, "outside", None),  # -40 mm at +2 sigma: before the stage
+        (2.0, 1.5, "uncertain", "start"),  # -1 mm at -2 sigma
+        (-2.0, 3.0, "uncertain", "start"),  # +4 mm at +2 sigma
+        (249.0, 1.0, "uncertain", "end"),
+        (255.0, 2.0, "outside", None),
+        (100.0, np.nan, "uncertain", "start"),  # no sigma: cannot be sure
+    ],
+)
+def test_waist_accessibility_from_two_sigma(z0_mm, z0_std_mm, expected, end) -> None:
+    fit = CausticFit(
+        d0_m=0.2e-3,
+        d0_std_m=1e-6,
+        z0_m=z0_mm * 1e-3,
+        z0_std_m=z0_std_mm * 1e-3,
+        theta_rad=8e-3,
+        theta_std_rad=1e-5,
+        z_r_m=0.025,
+        z_r_std_m=1e-4,
+        m2=1.2,
+        m2_std=0.01,
+        residual_rms=0.003,
+        n_points=10,
+        success=True,
+    )
+    session = MeasurementSession(clean_scenario())  # stage 0-250 mm
+    assert tools._waist_accessibility(session, fit) == (expected, end)
 
 
 def test_different_xy_waists_fitted_per_axis() -> None:

@@ -250,8 +250,30 @@ def test_stops_at_the_model_call_limit() -> None:
     run = run_agent(session, client, AgentConfig(max_model_calls=5))
     assert len(client.requests) == 5
     assert run.stop_reason == "model call limit reached (5)"
-    assert not session.finished
-    assert run.report is None
+    # The controller writes a fallback report from session state.
+    assert session.finished
+    assert run.report["verdict"] == "measurement_failed"
+    assert run.report["stopped_by_limit"] == "model call limit reached (5)"
+    assert "Stopped by the controller" in run.report["explanation"]
+
+
+def test_fallback_report_uses_determined_m2() -> None:
+    """Stopped after enough good data: estimate_not_compliant, not failed."""
+    positions = [60.0, 100.0, 120.0, 140.0, 180.0]
+    calls = [
+        _response(_call("measure_at", z_mm=z, exposure_ms=exposure))
+        for z, exposure in zip(positions, [10.0, 1.5, 1.2, 1.5, 9.0], strict=True)
+    ]
+    accepts = [
+        _response(_call("set_status", measurement_id=f"m{i}", status="accept"))
+        for i in range(1, 6)
+    ]
+    client = FakeClient(calls + accepts)
+    session = _session()
+    run = run_agent(session, client, AgentConfig(max_model_calls=10))
+    assert run.report["verdict"] == "estimate_not_compliant"
+    assert run.report["evaluation"]["x"]["m2"] is not None
+    assert run.report["stopped_by_limit"].startswith("model call limit")
 
 
 def test_stops_at_the_token_budget() -> None:
@@ -281,6 +303,8 @@ def test_api_error_stops_cleanly() -> None:
     run = run_agent(_session(), client)
     assert run.stop_reason == "API error: ConnectionError: network down"
     assert run.steps == []
+    assert run.report["verdict"] == "measurement_failed"
+    assert run.report["stopped_by_limit"] == run.stop_reason
 
 
 def test_requests_never_contain_the_hidden_truth() -> None:
