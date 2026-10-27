@@ -1,0 +1,3948 @@
+{
+  "scenario": "clean",
+  "seed": 1,
+  "positions_used": 15,
+  "truth": {
+    "scenario": "clean",
+    "wavelength_nm": 1064.0,
+    "d0_x_um": 200.0,
+    "z0_x_mm": 120.0,
+    "z_r_x_mm": 24.60520562022081,
+    "m2_x": 1.2,
+    "d0_y_um": 210.0,
+    "z0_y_mm": 120.0,
+    "z_r_y_mm": 26.042149628441702,
+    "m2_y": 1.25
+  },
+  "scenario_params": {
+    "beam": {
+      "wavelength_m": 1.064e-06,
+      "d0x_m": 0.0002,
+      "d0y_m": 0.00021,
+      "z0x_m": 0.12,
+      "z0y_m": 0.12,
+      "m2x": 1.2,
+      "m2y": 1.25
+    },
+    "camera": {
+      "pixel_size_m": 5.5e-06,
+      "nx": 512,
+      "ny": 512,
+      "bit_depth": 12,
+      "offset_counts": 100.0,
+      "read_noise_counts": 5.0,
+      "signal_counts_per_ms": 1000000.0,
+      "shot_noise": true
+    },
+    "stage_min_m": 0.0,
+    "stage_max_m": 0.25,
+    "faults": {
+      "extra_background_counts": 0.0,
+      "power_factor": 1.0
+    },
+    "fault_schedule": []
+  },
+  "fault_events": [
+    {
+      "before_measurement": 6,
+      "source": "operator",
+      "faults": {
+        "extra_background_counts": 3.0,
+        "power_factor": 1.0
+      }
+    }
+  ],
+  "tool_log": [
+    {
+      "tool": "get_setup",
+      "arguments": {
+        "reason": "get setup parameters"
+      },
+      "reason": "get setup parameters",
+      "result": {
+        "wavelength_nm": 1064.0,
+        "stage_range_mm": [
+          0.0,
+          250.0
+        ],
+        "pixel_size_um": 5.5,
+        "sensor_px": [
+          512,
+          512
+        ],
+        "sensor_size_mm": [
+          2.816,
+          2.816
+        ],
+        "full_scale_counts": 4095,
+        "exposure_range_ms": [
+          0.01,
+          200.0
+        ],
+        "repeats_per_position": 5,
+        "max_positions": 20,
+        "positions_left": 20,
+        "min_beam_width_um": 110.0
+      }
+    },
+    {
+      "tool": "measure_at",
+      "arguments": {
+        "z_mm": 0.0,
+        "exposure_ms": 5.0,
+        "reason": "scout low end"
+      },
+      "reason": "scout low end",
+      "result": {
+        "measurement_id": "m1",
+        "z_mm": 0.0,
+        "exposure_ms": 5.0,
+        "d_x_um": {
+          "mean": 1024.3,
+          "std": 40.0
+        },
+        "d_y_um": {
+          "mean": 1018.9,
+          "std": 44.2
+        },
+        "status": "pending",
+        "positions_left": 19,
+        "flags": {
+          "saturated": false,
+          "low_signal": true,
+          "clipping_loss": false,
+          "too_few_pixels": false,
+          "not_converged": false,
+          "roi_clipped": true,
+          "beam_in_corners": false,
+          "background_changed": false,
+          "axes_not_aligned": false
+        },
+        "suggested_verdict": "reject",
+        "reasons": [
+          "low signal: peak below 500 counts, use a longer exposure"
+        ],
+        "warnings": [
+          "the 3 x d integration area is cut by the sensor edge (estimated clipping loss below 1 %)"
+        ],
+        "details": {
+          "peak_counts": 447.0,
+          "saturated_pixel_fraction": 0.0,
+          "residual_offset_counts": -0.129,
+          "max_offset_sigma": 2.8,
+          "clipping_loss_percent": 0.0,
+          "pixels_across": 185.3,
+          "centroid_um": [
+            0.3,
+            0.2
+          ],
+          "ellipticity": 0.99,
+          "azimuth_deg": 1.9,
+          "misalignment_deg": 0.0
+        }
+      }
+    },
+    {
+      "tool": "measure_at",
+      "arguments": {
+        "z_mm": 125.0,
+        "exposure_ms": 5.0,
+        "reason": "scout mid"
+      },
+      "reason": "scout mid",
+      "result": {
+        "measurement_id": "m2",
+        "z_mm": 125.0,
+        "exposure_ms": 5.0,
+        "d_x_um": {
+          "mean": 221.2,
+          "std": 0.7
+        },
+        "d_y_um": {
+          "mean": 231.7,
+          "std": 0.7
+        },
+        "status": "pending",
+        "positions_left": 18,
+        "flags": {
+          "saturated": true,
+          "low_signal": false,
+          "clipping_loss": false,
+          "too_few_pixels": false,
+          "not_converged": false,
+          "roi_clipped": false,
+          "beam_in_corners": false,
+          "background_changed": false,
+          "axes_not_aligned": false
+        },
+        "suggested_verdict": "reject",
+        "reasons": [
+          "saturated: pixels at full scale, use a shorter exposure"
+        ],
+        "warnings": [],
+        "details": {
+          "peak_counts": 3997.0,
+          "saturated_pixel_fraction": 0.00172,
+          "residual_offset_counts": 0.013,
+          "max_offset_sigma": 1.7,
+          "clipping_loss_percent": 0.0,
+          "pixels_across": 40.2,
+          "centroid_um": [
+            0.0,
+            0.0
+          ],
+          "ellipticity": 0.955,
+          "azimuth_deg": 88.2,
+          "misalignment_deg": 0.0
+        }
+      }
+    },
+    {
+      "tool": "measure_at",
+      "arguments": {
+        "z_mm": 250.0,
+        "exposure_ms": 5.0,
+        "reason": "scout high end"
+      },
+      "reason": "scout high end",
+      "result": {
+        "measurement_id": "m3",
+        "z_mm": 250.0,
+        "exposure_ms": 5.0,
+        "d_x_um": {
+          "mean": 1080.5,
+          "std": 39.2
+        },
+        "d_y_um": {
+          "mean": 1073.8,
+          "std": 42.5
+        },
+        "status": "pending",
+        "positions_left": 17,
+        "flags": {
+          "saturated": false,
+          "low_signal": true,
+          "clipping_loss": false,
+          "too_few_pixels": false,
+          "not_converged": false,
+          "roi_clipped": true,
+          "beam_in_corners": false,
+          "background_changed": false,
+          "axes_not_aligned": false
+        },
+        "suggested_verdict": "reject",
+        "reasons": [
+          "low signal: peak below 500 counts, use a longer exposure"
+        ],
+        "warnings": [
+          "the 3 x d integration area is cut by the sensor edge (estimated clipping loss below 1 %)"
+        ],
+        "details": {
+          "peak_counts": 391.0,
+          "saturated_pixel_fraction": 0.0,
+          "residual_offset_counts": -0.029,
+          "max_offset_sigma": 1.6,
+          "clipping_loss_percent": 0.0,
+          "pixels_across": 195.2,
+          "centroid_um": [
+            -0.3,
+            -0.1
+          ],
+          "ellipticity": 0.992,
+          "azimuth_deg": 9.8,
+          "misalignment_deg": 0.0
+        }
+      }
+    },
+    {
+      "tool": "measure_at",
+      "arguments": {
+        "z_mm": 125.0,
+        "exposure_ms": 3.0,
+        "reason": "rescale waist exposure down"
+      },
+      "reason": "rescale waist exposure down",
+      "result": {
+        "measurement_id": "m4",
+        "z_mm": 125.0,
+        "exposure_ms": 3.0,
+        "d_x_um": {
+          "mean": 207.3,
+          "std": 0.4
+        },
+        "d_y_um": {
+          "mean": 217.4,
+          "std": 0.4
+        },
+        "status": "pending",
+        "positions_left": 16,
+        "flags": {
+          "saturated": true,
+          "low_signal": false,
+          "clipping_loss": false,
+          "too_few_pixels": false,
+          "not_converged": false,
+          "roi_clipped": false,
+          "beam_in_corners": false,
+          "background_changed": false,
+          "axes_not_aligned": false
+        },
+        "suggested_verdict": "reject",
+        "reasons": [
+          "saturated: pixels at full scale, use a shorter exposure"
+        ],
+        "warnings": [],
+        "details": {
+          "peak_counts": 3997.0,
+          "saturated_pixel_fraction": 0.000622,
+          "residual_offset_counts": -0.05,
+          "max_offset_sigma": 0.9,
+          "clipping_loss_percent": 0.0,
+          "pixels_across": 37.7,
+          "centroid_um": [
+            0.0,
+            0.0
+          ],
+          "ellipticity": 0.953,
+          "azimuth_deg": -87.9,
+          "misalignment_deg": 0.0
+        }
+      }
+    },
+    {
+      "tool": "measure_at",
+      "arguments": {
+        "z_mm": 0.0,
+        "exposure_ms": 30.0,
+        "reason": "rescale far low end exposure up"
+      },
+      "reason": "rescale far low end exposure up",
+      "result": {
+        "measurement_id": "m5",
+        "z_mm": 0.0,
+        "exposure_ms": 30.0,
+        "d_x_um": {
+          "mean": 997.6,
+          "std": 6.4
+        },
+        "d_y_um": {
+          "mean": 991.6,
+          "std": 6.4
+        },
+        "status": "pending",
+        "positions_left": 15,
+        "flags": {
+          "saturated": false,
+          "low_signal": false,
+          "clipping_loss": false,
+          "too_few_pixels": false,
+          "not_converged": false,
+          "roi_clipped": true,
+          "beam_in_corners": false,
+          "background_changed": false,
+          "axes_not_aligned": false
+        },
+        "suggested_verdict": "accept",
+        "reasons": [],
+        "warnings": [
+          "the 3 x d integration area is cut by the sensor edge (estimated clipping loss below 1 %)"
+        ],
+        "details": {
+          "peak_counts": 2465.0,
+          "saturated_pixel_fraction": 0.0,
+          "residual_offset_counts": -0.045,
+          "max_offset_sigma": 1.7,
+          "clipping_loss_percent": 0.0,
+          "pixels_across": 180.3,
+          "centroid_um": [
+            0.1,
+            -0.0
+          ],
+          "ellipticity": 0.994,
+          "azimuth_deg": 1.9,
+          "misalignment_deg": 0.0
+        }
+      }
+    },
+    {
+      "tool": "measure_at",
+      "arguments": {
+        "z_mm": 250.0,
+        "exposure_ms": 30.0,
+        "reason": "rescale far high end exposure up"
+      },
+      "reason": "rescale far high end exposure up",
+      "result": {
+        "measurement_id": "m6",
+        "z_mm": 250.0,
+        "exposure_ms": 30.0,
+        "d_x_um": {
+          "mean": 1074.1,
+          "std": 4.2
+        },
+        "d_y_um": {
+          "mean": 1068.2,
+          "std": 4.0
+        },
+        "status": "pending",
+        "positions_left": 14,
+        "flags": {
+          "saturated": false,
+          "low_signal": false,
+          "clipping_loss": false,
+          "too_few_pixels": false,
+          "not_converged": false,
+          "roi_clipped": true,
+          "beam_in_corners": false,
+          "background_changed": true,
+          "axes_not_aligned": false
+        },
+        "suggested_verdict": "accept",
+        "reasons": [],
+        "warnings": [
+          "the 3 x d integration area is cut by the sensor edge (estimated clipping loss below 1 %)",
+          "background differs from the dark frames (corrected by the corner offset, but check the setup)"
+        ],
+        "details": {
+          "peak_counts": 2120.0,
+          "saturated_pixel_fraction": 0.0,
+          "residual_offset_counts": 3.025,
+          "max_offset_sigma": 22.8,
+          "clipping_loss_percent": 0.0,
+          "pixels_across": 194.2,
+          "centroid_um": [
+            -0.1,
+            0.0
+          ],
+          "ellipticity": 0.995,
+          "azimuth_deg": 4.3,
+          "misalignment_deg": 0.0
+        }
+      }
+    },
+    {
+      "tool": "set_status",
+      "arguments": {
+        "measurement_id": "m1",
+        "status": "reject",
+        "reason": "low signal reject scout"
+      },
+      "reason": "low signal reject scout",
+      "result": {
+        "measurement_id": "m1",
+        "status": "reject",
+        "accepted_count": 0
+      }
+    },
+    {
+      "tool": "set_status",
+      "arguments": {
+        "measurement_id": "m2",
+        "status": "reject",
+        "reason": "saturated"
+      },
+      "reason": "saturated",
+      "result": {
+        "measurement_id": "m2",
+        "status": "reject",
+        "accepted_count": 0
+      }
+    },
+    {
+      "tool": "set_status",
+      "arguments": {
+        "measurement_id": "m3",
+        "status": "reject",
+        "reason": "low signal"
+      },
+      "reason": "low signal",
+      "result": {
+        "measurement_id": "m3",
+        "status": "reject",
+        "accepted_count": 0
+      }
+    },
+    {
+      "tool": "set_status",
+      "arguments": {
+        "measurement_id": "m4",
+        "status": "reject",
+        "reason": "still saturated"
+      },
+      "reason": "still saturated",
+      "result": {
+        "measurement_id": "m4",
+        "status": "reject",
+        "accepted_count": 0
+      }
+    },
+    {
+      "tool": "set_status",
+      "arguments": {
+        "measurement_id": "m5",
+        "status": "accept",
+        "reason": "good peak 2465"
+      },
+      "reason": "good peak 2465",
+      "result": {
+        "measurement_id": "m5",
+        "status": "accept",
+        "accepted_count": 1
+      }
+    },
+    {
+      "tool": "set_status",
+      "arguments": {
+        "measurement_id": "m6",
+        "status": "accept",
+        "reason": "good peak 2120 roi clipped but <1%"
+      },
+      "reason": "good peak 2120 roi clipped but <1%",
+      "result": {
+        "measurement_id": "m6",
+        "status": "accept",
+        "accepted_count": 2
+      }
+    },
+    {
+      "tool": "measure_at",
+      "arguments": {
+        "z_mm": 125.0,
+        "exposure_ms": 1.5,
+        "reason": "reduce further to avoid saturation"
+      },
+      "reason": "reduce further to avoid saturation",
+      "result": {
+        "measurement_id": "m7",
+        "z_mm": 125.0,
+        "exposure_ms": 1.5,
+        "d_x_um": {
+          "mean": 202.7,
+          "std": 0.8
+        },
+        "d_y_um": {
+          "mean": 212.6,
+          "std": 0.8
+        },
+        "status": "pending",
+        "positions_left": 13,
+        "flags": {
+          "saturated": false,
+          "low_signal": false,
+          "clipping_loss": false,
+          "too_few_pixels": false,
+          "not_converged": false,
+          "roi_clipped": false,
+          "beam_in_corners": false,
+          "background_changed": true,
+          "axes_not_aligned": false
+        },
+        "suggested_verdict": "accept",
+        "reasons": [],
+        "warnings": [
+          "background differs from the dark frames (corrected by the corner offset, but check the setup)"
+        ],
+        "details": {
+          "peak_counts": 2707.0,
+          "saturated_pixel_fraction": 0.0,
+          "residual_offset_counts": 3.124,
+          "max_offset_sigma": 22.9,
+          "clipping_loss_percent": 0.0,
+          "pixels_across": 36.9,
+          "centroid_um": [
+            0.0,
+            0.0
+          ],
+          "ellipticity": 0.953,
+          "azimuth_deg": 84.2,
+          "misalignment_deg": 0.0
+        }
+      }
+    },
+    {
+      "tool": "set_status",
+      "arguments": {
+        "measurement_id": "m7",
+        "status": "accept",
+        "reason": "good peak 2707 no saturation"
+      },
+      "reason": "good peak 2707 no saturation",
+      "result": {
+        "measurement_id": "m7",
+        "status": "accept",
+        "accepted_count": 3
+      }
+    },
+    {
+      "tool": "retake_darks",
+      "arguments": {
+        "reason": "background changed flagged"
+      },
+      "reason": "background changed flagged",
+      "result": {
+        "dark_frames": 50,
+        "dark_sets_taken": 2,
+        "mean_dark_counts": 103.0,
+        "positions_left": 12
+      }
+    },
+    {
+      "tool": "evaluate",
+      "arguments": {
+        "reason": "estimate z0 zR"
+      },
+      "reason": "estimate z0 zR",
+      "result": {
+        "status": "not_enough_data",
+        "message": "3 accepted position(s); the caustic fit needs at least 4. ISO 11146-1 asks for at least 10: about 5 within one Rayleigh length of the waist and 5 beyond two.",
+        "accepted_positions": 3,
+        "table": [
+          {
+            "id": "m1",
+            "z_mm": 0.0,
+            "d_x_um": 1024.3,
+            "d_y_um": 1018.9,
+            "status": "reject",
+            "suggested": "reject",
+            "flags": [
+              "low_signal",
+              "roi_clipped"
+            ]
+          },
+          {
+            "id": "m2",
+            "z_mm": 125.0,
+            "d_x_um": 221.2,
+            "d_y_um": 231.7,
+            "status": "reject",
+            "suggested": "reject",
+            "flags": [
+              "saturated"
+            ]
+          },
+          {
+            "id": "m3",
+            "z_mm": 250.0,
+            "d_x_um": 1080.5,
+            "d_y_um": 1073.8,
+            "status": "reject",
+            "suggested": "reject",
+            "flags": [
+              "low_signal",
+              "roi_clipped"
+            ]
+          },
+          {
+            "id": "m4",
+            "z_mm": 125.0,
+            "d_x_um": 207.3,
+            "d_y_um": 217.4,
+            "status": "reject",
+            "suggested": "reject",
+            "flags": [
+              "saturated"
+            ]
+          },
+          {
+            "id": "m5",
+            "z_mm": 0.0,
+            "d_x_um": 997.6,
+            "d_y_um": 991.6,
+            "status": "accept",
+            "suggested": "accept",
+            "flags": [
+              "roi_clipped"
+            ]
+          },
+          {
+            "id": "m6",
+            "z_mm": 250.0,
+            "d_x_um": 1074.1,
+            "d_y_um": 1068.2,
+            "status": "accept",
+            "suggested": "accept",
+            "flags": [
+              "roi_clipped",
+              "background_changed"
+            ]
+          },
+          {
+            "id": "m7",
+            "z_mm": 125.0,
+            "d_x_um": 202.7,
+            "d_y_um": 212.6,
+            "status": "accept",
+            "suggested": "accept",
+            "flags": [
+              "background_changed"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "tool": "measure_at",
+      "arguments": {
+        "z_mm": 110.0,
+        "exposure_ms": 1.5,
+        "reason": "near waist +15mm"
+      },
+      "reason": "near waist +15mm",
+      "result": {
+        "measurement_id": "m8",
+        "z_mm": 110.0,
+        "exposure_ms": 1.5,
+        "d_x_um": {
+          "mean": 216.4,
+          "std": 1.5
+        },
+        "d_y_um": {
+          "mean": 225.5,
+          "std": 1.6
+        },
+        "status": "pending",
+        "positions_left": 11,
+        "flags": {
+          "saturated": false,
+          "low_signal": false,
+          "clipping_loss": false,
+          "too_few_pixels": false,
+          "not_converged": false,
+          "roi_clipped": false,
+          "beam_in_corners": false,
+          "background_changed": false,
+          "axes_not_aligned": false
+        },
+        "suggested_verdict": "accept",
+        "reasons": [],
+        "warnings": [],
+        "details": {
+          "peak_counts": 2435.0,
+          "saturated_pixel_fraction": 0.0,
+          "residual_offset_counts": -0.047,
+          "max_offset_sigma": 1.5,
+          "clipping_loss_percent": 0.0,
+          "pixels_across": 39.3,
+          "centroid_um": [
+            -0.0,
+            -0.0
+          ],
+          "ellipticity": 0.959,
+          "azimuth_deg": -85.6,
+          "misalignment_deg": 0.0
+        }
+      }
+    },
+    {
+      "tool": "measure_at",
+      "arguments": {
+        "z_mm": 115.0,
+        "exposure_ms": 1.5,
+        "reason": "near waist"
+      },
+      "reason": "near waist",
+      "result": {
+        "measurement_id": "m9",
+        "z_mm": 115.0,
+        "exposure_ms": 1.5,
+        "d_x_um": {
+          "mean": 204.0,
+          "std": 1.2
+        },
+        "d_y_um": {
+          "mean": 213.5,
+          "std": 1.4
+        },
+        "status": "pending",
+        "positions_left": 10,
+        "flags": {
+          "saturated": false,
+          "low_signal": false,
+          "clipping_loss": false,
+          "too_few_pixels": false,
+          "not_converged": false,
+          "roi_clipped": false,
+          "beam_in_corners": false,
+          "background_changed": false,
+          "axes_not_aligned": false
+        },
+        "suggested_verdict": "accept",
+        "reasons": [],
+        "warnings": [],
+        "details": {
+          "peak_counts": 2719.0,
+          "saturated_pixel_fraction": 0.0,
+          "residual_offset_counts": 0.037,
+          "max_offset_sigma": 1.7,
+          "clipping_loss_percent": 0.0,
+          "pixels_across": 37.1,
+          "centroid_um": [
+            0.0,
+            0.1
+          ],
+          "ellipticity": 0.955,
+          "azimuth_deg": -85.6,
+          "misalignment_deg": 0.0
+        }
+      }
+    },
+    {
+      "tool": "measure_at",
+      "arguments": {
+        "z_mm": 135.0,
+        "exposure_ms": 1.5,
+        "reason": "near waist other side"
+      },
+      "reason": "near waist other side",
+      "result": {
+        "measurement_id": "m10",
+        "z_mm": 135.0,
+        "exposure_ms": 1.5,
+        "d_x_um": {
+          "mean": 232.7,
+          "std": 1.5
+        },
+        "d_y_um": {
+          "mean": 240.7,
+          "std": 1.9
+        },
+        "status": "pending",
+        "positions_left": 9,
+        "flags": {
+          "saturated": false,
+          "low_signal": false,
+          "clipping_loss": false,
+          "too_few_pixels": false,
+          "not_converged": false,
+          "roi_clipped": false,
+          "beam_in_corners": false,
+          "background_changed": false,
+          "axes_not_aligned": false
+        },
+        "suggested_verdict": "accept",
+        "reasons": [],
+        "warnings": [],
+        "details": {
+          "peak_counts": 2095.0,
+          "saturated_pixel_fraction": 0.0,
+          "residual_offset_counts": 0.119,
+          "max_offset_sigma": 1.9,
+          "clipping_loss_percent": 0.0,
+          "pixels_across": 42.3,
+          "centroid_um": [
+            0.0,
+            -0.1
+          ],
+          "ellipticity": 0.965,
+          "azimuth_deg": 88.4,
+          "misalignment_deg": 0.0
+        }
+      }
+    },
+    {
+      "tool": "measure_at",
+      "arguments": {
+        "z_mm": 140.0,
+        "exposure_ms": 1.5,
+        "reason": "near waist far side"
+      },
+      "reason": "near waist far side",
+      "result": {
+        "measurement_id": "m11",
+        "z_mm": 140.0,
+        "exposure_ms": 1.5,
+        "d_x_um": {
+          "mean": 257.3,
+          "std": 3.3
+        },
+        "d_y_um": {
+          "mean": 264.2,
+          "std": 2.8
+        },
+        "status": "pending",
+        "positions_left": 8,
+        "flags": {
+          "saturated": false,
+          "low_signal": false,
+          "clipping_loss": false,
+          "too_few_pixels": false,
+          "not_converged": false,
+          "roi_clipped": false,
+          "beam_in_corners": false,
+          "background_changed": false,
+          "axes_not_aligned": false
+        },
+        "suggested_verdict": "accept",
+        "reasons": [],
+        "warnings": [],
+        "details": {
+          "peak_counts": 1761.0,
+          "saturated_pixel_fraction": 0.0,
+          "residual_offset_counts": 0.029,
+          "max_offset_sigma": 1.5,
+          "clipping_loss_percent": 0.0,
+          "pixels_across": 46.8,
+          "centroid_um": [
+            0.0,
+            0.0
+          ],
+          "ellipticity": 0.974,
+          "azimuth_deg": -83.6,
+          "misalignment_deg": 0.0
+        }
+      }
+    },
+    {
+      "tool": "set_status",
+      "arguments": {
+        "measurement_id": "m8",
+        "status": "accept",
+        "reason": "good near waist"
+      },
+      "reason": "good near waist",
+      "result": {
+        "measurement_id": "m8",
+        "status": "accept",
+        "accepted_count": 4
+      }
+    },
+    {
+      "tool": "set_status",
+      "arguments": {
+        "measurement_id": "m9",
+        "status": "accept",
+        "reason": "good near waist"
+      },
+      "reason": "good near waist",
+      "result": {
+        "measurement_id": "m9",
+        "status": "accept",
+        "accepted_count": 5
+      }
+    },
+    {
+      "tool": "set_status",
+      "arguments": {
+        "measurement_id": "m10",
+        "status": "accept",
+        "reason": "good near waist"
+      },
+      "reason": "good near waist",
+      "result": {
+        "measurement_id": "m10",
+        "status": "accept",
+        "accepted_count": 6
+      }
+    },
+    {
+      "tool": "set_status",
+      "arguments": {
+        "measurement_id": "m11",
+        "status": "accept",
+        "reason": "good near waist"
+      },
+      "reason": "good near waist",
+      "result": {
+        "measurement_id": "m11",
+        "status": "accept",
+        "accepted_count": 7
+      }
+    },
+    {
+      "tool": "evaluate",
+      "arguments": {
+        "reason": "check coverage after near cluster"
+      },
+      "reason": "check coverage after near cluster",
+      "result": {
+        "status": "ok",
+        "accepted_positions": 7,
+        "x": {
+          "fit_success": true,
+          "not_determined": null,
+          "waist_side": null,
+          "waist_gap_mm": null,
+          "d0_um": 199.5,
+          "d0_std_um": 0.28,
+          "z0_mm": 120.202,
+          "z0_std_mm": 0.075,
+          "theta_mrad": 8.1362,
+          "theta_std_mrad": 0.0146,
+          "z_r_mm": 24.52,
+          "z_r_std_mm": 0.062,
+          "m2": 1.1982,
+          "m2_std": 0.0024,
+          "residual_rms_percent": 0.188,
+          "coverage": {
+            "near": 5,
+            "far": 2,
+            "between": 0,
+            "compliant": false,
+            "summary": "x: 5 within ±1 zR, need 5; 2 beyond 2 zR, need 5"
+          },
+          "waist_accessibility": "inside",
+          "waist_near_stage_end": null,
+          "m2_below_1": false
+        },
+        "y": {
+          "fit_success": true,
+          "not_determined": null,
+          "waist_side": null,
+          "waist_gap_mm": null,
+          "d0_um": 209.45,
+          "d0_std_um": 0.26,
+          "z0_mm": 120.204,
+          "z0_std_mm": 0.073,
+          "theta_mrad": 8.0706,
+          "theta_std_mrad": 0.0132,
+          "z_r_mm": 25.952,
+          "z_r_std_mm": 0.059,
+          "m2": 1.2478,
+          "m2_std": 0.0023,
+          "residual_rms_percent": 0.17,
+          "coverage": {
+            "near": 5,
+            "far": 2,
+            "between": 0,
+            "compliant": false,
+            "summary": "y: 5 within ±1 zR, need 5; 2 beyond 2 zR, need 5"
+          },
+          "waist_accessibility": "inside",
+          "waist_near_stage_end": null,
+          "m2_below_1": false
+        },
+        "iso_coverage_met": false,
+        "general_astigmatism": false,
+        "axes_not_aligned": false,
+        "m2_below_1": false,
+        "table": [
+          {
+            "id": "m1",
+            "z_mm": 0.0,
+            "d_x_um": 1024.3,
+            "d_y_um": 1018.9,
+            "status": "reject",
+            "suggested": "reject",
+            "flags": [
+              "low_signal",
+              "roi_clipped"
+            ]
+          },
+          {
+            "id": "m2",
+            "z_mm": 125.0,
+            "d_x_um": 221.2,
+            "d_y_um": 231.7,
+            "status": "reject",
+            "suggested": "reject",
+            "flags": [
+              "saturated"
+            ]
+          },
+          {
+            "id": "m3",
+            "z_mm": 250.0,
+            "d_x_um": 1080.5,
+            "d_y_um": 1073.8,
+            "status": "reject",
+            "suggested": "reject",
+            "flags": [
+              "low_signal",
+              "roi_clipped"
+            ]
+          },
+          {
+            "id": "m4",
+            "z_mm": 125.0,
+            "d_x_um": 207.3,
+            "d_y_um": 217.4,
+            "status": "reject",
+            "suggested": "reject",
+            "flags": [
+              "saturated"
+            ]
+          },
+          {
+            "id": "m5",
+            "z_mm": 0.0,
+            "d_x_um": 997.6,
+            "d_y_um": 991.6,
+            "status": "accept",
+            "suggested": "accept",
+            "flags": [
+              "roi_clipped"
+            ]
+          },
+          {
+            "id": "m6",
+            "z_mm": 250.0,
+            "d_x_um": 1074.1,
+            "d_y_um": 1068.2,
+            "status": "accept",
+            "suggested": "accept",
+            "flags": [
+              "roi_clipped",
+              "background_changed"
+            ]
+          },
+          {
+            "id": "m7",
+            "z_mm": 125.0,
+            "d_x_um": 202.7,
+            "d_y_um": 212.6,
+            "status": "accept",
+            "suggested": "accept",
+            "flags": [
+              "background_changed"
+            ]
+          },
+          {
+            "id": "m8",
+            "z_mm": 110.0,
+            "d_x_um": 216.4,
+            "d_y_um": 225.5,
+            "status": "accept",
+            "suggested": "accept",
+            "flags": []
+          },
+          {
+            "id": "m9",
+            "z_mm": 115.0,
+            "d_x_um": 204.0,
+            "d_y_um": 213.5,
+            "status": "accept",
+            "suggested": "accept",
+            "flags": []
+          },
+          {
+            "id": "m10",
+            "z_mm": 135.0,
+            "d_x_um": 232.7,
+            "d_y_um": 240.7,
+            "status": "accept",
+            "suggested": "accept",
+            "flags": []
+          },
+          {
+            "id": "m11",
+            "z_mm": 140.0,
+            "d_x_um": 257.3,
+            "d_y_um": 264.2,
+            "status": "accept",
+            "suggested": "accept",
+            "flags": []
+          }
+        ]
+      }
+    },
+    {
+      "tool": "measure_at",
+      "arguments": {
+        "z_mm": 30.0,
+        "exposure_ms": 20.0,
+        "reason": "far beyond 2zR low side"
+      },
+      "reason": "far beyond 2zR low side",
+      "result": {
+        "measurement_id": "m12",
+        "z_mm": 30.0,
+        "exposure_ms": 20.0,
+        "d_x_um": {
+          "mean": 759.7,
+          "std": 5.8
+        },
+        "d_y_um": {
+          "mean": 756.9,
+          "std": 5.8
+        },
+        "status": "pending",
+        "positions_left": 7,
+        "flags": {
+          "saturated": false,
+          "low_signal": false,
+          "clipping_loss": false,
+          "too_few_pixels": false,
+          "not_converged": false,
+          "roi_clipped": false,
+          "beam_in_corners": false,
+          "background_changed": false,
+          "axes_not_aligned": false
+        },
+        "suggested_verdict": "accept",
+        "reasons": [],
+        "warnings": [],
+        "details": {
+          "peak_counts": 2802.0,
+          "saturated_pixel_fraction": 0.0,
+          "residual_offset_counts": -0.037,
+          "max_offset_sigma": 1.4,
+          "clipping_loss_percent": 0.0,
+          "pixels_across": 137.6,
+          "centroid_um": [
+            0.0,
+            -0.0
+          ],
+          "ellipticity": 0.996,
+          "azimuth_deg": -5.2,
+          "misalignment_deg": 0.0
+        }
+      }
+    },
+    {
+      "tool": "measure_at",
+      "arguments": {
+        "z_mm": 50.0,
+        "exposure_ms": 12.0,
+        "reason": "far beyond 2zR low side"
+      },
+      "reason": "far beyond 2zR low side",
+      "result": {
+        "measurement_id": "m13",
+        "z_mm": 50.0,
+        "exposure_ms": 12.0,
+        "d_x_um": {
+          "mean": 602.9,
+          "std": 3.2
+        },
+        "d_y_um": {
+          "mean": 602.0,
+          "std": 3.2
+        },
+        "status": "pending",
+        "positions_left": 6,
+        "flags": {
+          "saturated": false,
+          "low_signal": false,
+          "clipping_loss": false,
+          "too_few_pixels": false,
+          "not_converged": false,
+          "roi_clipped": false,
+          "beam_in_corners": false,
+          "background_changed": false,
+          "axes_not_aligned": false
+        },
+        "suggested_verdict": "accept",
+        "reasons": [],
+        "warnings": [],
+        "details": {
+          "peak_counts": 2653.0,
+          "saturated_pixel_fraction": 0.0,
+          "residual_offset_counts": -0.0,
+          "max_offset_sigma": 1.4,
+          "clipping_loss_percent": 0.0,
+          "pixels_across": 109.5,
+          "centroid_um": [
+            -0.0,
+            -0.0
+          ],
+          "ellipticity": 0.998,
+          "azimuth_deg": -13.2,
+          "misalignment_deg": 0.0
+        }
+      }
+    },
+    {
+      "tool": "measure_at",
+      "arguments": {
+        "z_mm": 195.0,
+        "exposure_ms": 16.0,
+        "reason": "far beyond 2zR high side"
+      },
+      "reason": "far beyond 2zR high side",
+      "result": {
+        "measurement_id": "m14",
+        "z_mm": 195.0,
+        "exposure_ms": 16.0,
+        "d_x_um": {
+          "mean": 640.6,
+          "std": 3.5
+        },
+        "d_y_um": {
+          "mean": 639.3,
+          "std": 3.6
+        },
+        "status": "pending",
+        "positions_left": 5,
+        "flags": {
+          "saturated": false,
+          "low_signal": false,
+          "clipping_loss": false,
+          "too_few_pixels": false,
+          "not_converged": false,
+          "roi_clipped": false,
+          "beam_in_corners": false,
+          "background_changed": false,
+          "axes_not_aligned": false
+        },
+        "suggested_verdict": "accept",
+        "reasons": [],
+        "warnings": [],
+        "details": {
+          "peak_counts": 3127.0,
+          "saturated_pixel_fraction": 0.0,
+          "residual_offset_counts": 0.049,
+          "max_offset_sigma": 1.5,
+          "clipping_loss_percent": 0.0,
+          "pixels_across": 116.2,
+          "centroid_um": [
+            0.0,
+            -0.0
+          ],
+          "ellipticity": 0.998,
+          "azimuth_deg": -2.0,
+          "misalignment_deg": 0.0
+        }
+      }
+    },
+    {
+      "tool": "set_status",
+      "arguments": {
+        "measurement_id": "m12",
+        "status": "accept",
+        "reason": "good far peak 2802"
+      },
+      "reason": "good far peak 2802",
+      "result": {
+        "measurement_id": "m12",
+        "status": "accept",
+        "accepted_count": 8
+      }
+    },
+    {
+      "tool": "set_status",
+      "arguments": {
+        "measurement_id": "m13",
+        "status": "accept",
+        "reason": "good far peak 2653"
+      },
+      "reason": "good far peak 2653",
+      "result": {
+        "measurement_id": "m13",
+        "status": "accept",
+        "accepted_count": 9
+      }
+    },
+    {
+      "tool": "set_status",
+      "arguments": {
+        "measurement_id": "m14",
+        "status": "accept",
+        "reason": "good far peak 3127"
+      },
+      "reason": "good far peak 3127",
+      "result": {
+        "measurement_id": "m14",
+        "status": "accept",
+        "accepted_count": 10
+      }
+    },
+    {
+      "tool": "evaluate",
+      "arguments": {
+        "reason": "check ISO coverage after 5 far"
+      },
+      "reason": "check ISO coverage after 5 far",
+      "result": {
+        "status": "ok",
+        "accepted_positions": 10,
+        "x": {
+          "fit_success": true,
+          "not_determined": null,
+          "waist_side": null,
+          "waist_gap_mm": null,
+          "d0_um": 199.5,
+          "d0_std_um": 0.24,
+          "z0_mm": 120.165,
+          "z0_std_mm": 0.055,
+          "theta_mrad": 8.1291,
+          "theta_std_mrad": 0.0085,
+          "z_r_mm": 24.541,
+          "z_r_std_mm": 0.044,
+          "m2": 1.1971,
+          "m2_std": 0.0017,
+          "residual_rms_percent": 0.181,
+          "coverage": {
+            "near": 5,
+            "far": 5,
+            "between": 0,
+            "compliant": true,
+            "summary": "x: 5 within ±1 zR, need 5; 5 beyond 2 zR, need 5"
+          },
+          "waist_accessibility": "inside",
+          "waist_near_stage_end": null,
+          "m2_below_1": false
+        },
+        "y": {
+          "fit_success": true,
+          "not_determined": null,
+          "waist_side": null,
+          "waist_gap_mm": null,
+          "d0_um": 209.44,
+          "d0_std_um": 0.23,
+          "z0_mm": 120.164,
+          "z0_std_mm": 0.054,
+          "theta_mrad": 8.0648,
+          "theta_std_mrad": 0.0079,
+          "z_r_mm": 25.969,
+          "z_r_std_mm": 0.043,
+          "m2": 1.2468,
+          "m2_std": 0.0016,
+          "residual_rms_percent": 0.168,
+          "coverage": {
+            "near": 5,
+            "far": 5,
+            "between": 0,
+            "compliant": true,
+            "summary": "y: 5 within ±1 zR, need 5; 5 beyond 2 zR, need 5"
+          },
+          "waist_accessibility": "inside",
+          "waist_near_stage_end": null,
+          "m2_below_1": false
+        },
+        "iso_coverage_met": true,
+        "general_astigmatism": false,
+        "axes_not_aligned": false,
+        "m2_below_1": false,
+        "table": [
+          {
+            "id": "m1",
+            "z_mm": 0.0,
+            "d_x_um": 1024.3,
+            "d_y_um": 1018.9,
+            "status": "reject",
+            "suggested": "reject",
+            "flags": [
+              "low_signal",
+              "roi_clipped"
+            ]
+          },
+          {
+            "id": "m2",
+            "z_mm": 125.0,
+            "d_x_um": 221.2,
+            "d_y_um": 231.7,
+            "status": "reject",
+            "suggested": "reject",
+            "flags": [
+              "saturated"
+            ]
+          },
+          {
+            "id": "m3",
+            "z_mm": 250.0,
+            "d_x_um": 1080.5,
+            "d_y_um": 1073.8,
+            "status": "reject",
+            "suggested": "reject",
+            "flags": [
+              "low_signal",
+              "roi_clipped"
+            ]
+          },
+          {
+            "id": "m4",
+            "z_mm": 125.0,
+            "d_x_um": 207.3,
+            "d_y_um": 217.4,
+            "status": "reject",
+            "suggested": "reject",
+            "flags": [
+              "saturated"
+            ]
+          },
+          {
+            "id": "m5",
+            "z_mm": 0.0,
+            "d_x_um": 997.6,
+            "d_y_um": 991.6,
+            "status": "accept",
+            "suggested": "accept",
+            "flags": [
+              "roi_clipped"
+            ]
+          },
+          {
+            "id": "m6",
+            "z_mm": 250.0,
+            "d_x_um": 1074.1,
+            "d_y_um": 1068.2,
+            "status": "accept",
+            "suggested": "accept",
+            "flags": [
+              "roi_clipped",
+              "background_changed"
+            ]
+          },
+          {
+            "id": "m7",
+            "z_mm": 125.0,
+            "d_x_um": 202.7,
+            "d_y_um": 212.6,
+            "status": "accept",
+            "suggested": "accept",
+            "flags": [
+              "background_changed"
+            ]
+          },
+          {
+            "id": "m8",
+            "z_mm": 110.0,
+            "d_x_um": 216.4,
+            "d_y_um": 225.5,
+            "status": "accept",
+            "suggested": "accept",
+            "flags": []
+          },
+          {
+            "id": "m9",
+            "z_mm": 115.0,
+            "d_x_um": 204.0,
+            "d_y_um": 213.5,
+            "status": "accept",
+            "suggested": "accept",
+            "flags": []
+          },
+          {
+            "id": "m10",
+            "z_mm": 135.0,
+            "d_x_um": 232.7,
+            "d_y_um": 240.7,
+            "status": "accept",
+            "suggested": "accept",
+            "flags": []
+          },
+          {
+            "id": "m11",
+            "z_mm": 140.0,
+            "d_x_um": 257.3,
+            "d_y_um": 264.2,
+            "status": "accept",
+            "suggested": "accept",
+            "flags": []
+          },
+          {
+            "id": "m12",
+            "z_mm": 30.0,
+            "d_x_um": 759.7,
+            "d_y_um": 756.9,
+            "status": "accept",
+            "suggested": "accept",
+            "flags": []
+          },
+          {
+            "id": "m13",
+            "z_mm": 50.0,
+            "d_x_um": 602.9,
+            "d_y_um": 602.0,
+            "status": "accept",
+            "suggested": "accept",
+            "flags": []
+          },
+          {
+            "id": "m14",
+            "z_mm": 195.0,
+            "d_x_um": 640.6,
+            "d_y_um": 639.3,
+            "status": "accept",
+            "suggested": "accept",
+            "flags": []
+          }
+        ]
+      }
+    },
+    {
+      "tool": "finish",
+      "arguments": {
+        "verdict": "iso_compliant",
+        "explanation": "ISO coverage met with 10 accepted positions (5 near, 5 far per axis). Waist at ~120.2 mm inside stage, no general astigmatism, M² >1. Caustic fits are low residual and well determined."
+      },
+      "reason": "ISO coverage met with 10 accepted positions (5 near, 5 far per axis). Waist at ~120.2 mm inside stage, no general astigmatism, M² >1. Caustic fits are low residual and well determined.",
+      "result": {
+        "report": {
+          "verdict": "iso_compliant",
+          "explanation": "ISO coverage met with 10 accepted positions (5 near, 5 far per axis). Waist at ~120.2 mm inside stage, no general astigmatism, M² >1. Caustic fits are low residual and well determined.",
+          "evaluation": {
+            "status": "ok",
+            "accepted_positions": 10,
+            "x": {
+              "fit_success": true,
+              "not_determined": null,
+              "waist_side": null,
+              "waist_gap_mm": null,
+              "d0_um": 199.5,
+              "d0_std_um": 0.24,
+              "z0_mm": 120.165,
+              "z0_std_mm": 0.055,
+              "theta_mrad": 8.1291,
+              "theta_std_mrad": 0.0085,
+              "z_r_mm": 24.541,
+              "z_r_std_mm": 0.044,
+              "m2": 1.1971,
+              "m2_std": 0.0017,
+              "residual_rms_percent": 0.181,
+              "coverage": {
+                "near": 5,
+                "far": 5,
+                "between": 0,
+                "compliant": true,
+                "summary": "x: 5 within ±1 zR, need 5; 5 beyond 2 zR, need 5"
+              },
+              "waist_accessibility": "inside",
+              "waist_near_stage_end": null,
+              "m2_below_1": false
+            },
+            "y": {
+              "fit_success": true,
+              "not_determined": null,
+              "waist_side": null,
+              "waist_gap_mm": null,
+              "d0_um": 209.44,
+              "d0_std_um": 0.23,
+              "z0_mm": 120.164,
+              "z0_std_mm": 0.054,
+              "theta_mrad": 8.0648,
+              "theta_std_mrad": 0.0079,
+              "z_r_mm": 25.969,
+              "z_r_std_mm": 0.043,
+              "m2": 1.2468,
+              "m2_std": 0.0016,
+              "residual_rms_percent": 0.168,
+              "coverage": {
+                "near": 5,
+                "far": 5,
+                "between": 0,
+                "compliant": true,
+                "summary": "y: 5 within ±1 zR, need 5; 5 beyond 2 zR, need 5"
+              },
+              "waist_accessibility": "inside",
+              "waist_near_stage_end": null,
+              "m2_below_1": false
+            },
+            "iso_coverage_met": true,
+            "general_astigmatism": false,
+            "axes_not_aligned": false,
+            "m2_below_1": false,
+            "table": [
+              {
+                "id": "m1",
+                "z_mm": 0.0,
+                "d_x_um": 1024.3,
+                "d_y_um": 1018.9,
+                "status": "reject",
+                "suggested": "reject",
+                "flags": [
+                  "low_signal",
+                  "roi_clipped"
+                ]
+              },
+              {
+                "id": "m2",
+                "z_mm": 125.0,
+                "d_x_um": 221.2,
+                "d_y_um": 231.7,
+                "status": "reject",
+                "suggested": "reject",
+                "flags": [
+                  "saturated"
+                ]
+              },
+              {
+                "id": "m3",
+                "z_mm": 250.0,
+                "d_x_um": 1080.5,
+                "d_y_um": 1073.8,
+                "status": "reject",
+                "suggested": "reject",
+                "flags": [
+                  "low_signal",
+                  "roi_clipped"
+                ]
+              },
+              {
+                "id": "m4",
+                "z_mm": 125.0,
+                "d_x_um": 207.3,
+                "d_y_um": 217.4,
+                "status": "reject",
+                "suggested": "reject",
+                "flags": [
+                  "saturated"
+                ]
+              },
+              {
+                "id": "m5",
+                "z_mm": 0.0,
+                "d_x_um": 997.6,
+                "d_y_um": 991.6,
+                "status": "accept",
+                "suggested": "accept",
+                "flags": [
+                  "roi_clipped"
+                ]
+              },
+              {
+                "id": "m6",
+                "z_mm": 250.0,
+                "d_x_um": 1074.1,
+                "d_y_um": 1068.2,
+                "status": "accept",
+                "suggested": "accept",
+                "flags": [
+                  "roi_clipped",
+                  "background_changed"
+                ]
+              },
+              {
+                "id": "m7",
+                "z_mm": 125.0,
+                "d_x_um": 202.7,
+                "d_y_um": 212.6,
+                "status": "accept",
+                "suggested": "accept",
+                "flags": [
+                  "background_changed"
+                ]
+              },
+              {
+                "id": "m8",
+                "z_mm": 110.0,
+                "d_x_um": 216.4,
+                "d_y_um": 225.5,
+                "status": "accept",
+                "suggested": "accept",
+                "flags": []
+              },
+              {
+                "id": "m9",
+                "z_mm": 115.0,
+                "d_x_um": 204.0,
+                "d_y_um": 213.5,
+                "status": "accept",
+                "suggested": "accept",
+                "flags": []
+              },
+              {
+                "id": "m10",
+                "z_mm": 135.0,
+                "d_x_um": 232.7,
+                "d_y_um": 240.7,
+                "status": "accept",
+                "suggested": "accept",
+                "flags": []
+              },
+              {
+                "id": "m11",
+                "z_mm": 140.0,
+                "d_x_um": 257.3,
+                "d_y_um": 264.2,
+                "status": "accept",
+                "suggested": "accept",
+                "flags": []
+              },
+              {
+                "id": "m12",
+                "z_mm": 30.0,
+                "d_x_um": 759.7,
+                "d_y_um": 756.9,
+                "status": "accept",
+                "suggested": "accept",
+                "flags": []
+              },
+              {
+                "id": "m13",
+                "z_mm": 50.0,
+                "d_x_um": 602.9,
+                "d_y_um": 602.0,
+                "status": "accept",
+                "suggested": "accept",
+                "flags": []
+              },
+              {
+                "id": "m14",
+                "z_mm": 195.0,
+                "d_x_um": 640.6,
+                "d_y_um": 639.3,
+                "status": "accept",
+                "suggested": "accept",
+                "flags": []
+              }
+            ]
+          },
+          "positions_measured": 14,
+          "positions_accepted": 10,
+          "positions_rejected": 4,
+          "positions_pending": 0
+        }
+      }
+    }
+  ],
+  "config": {
+    "model": "muse-spark-1.2",
+    "reasoning_effort": "low",
+    "max_model_calls": 40,
+    "max_total_tokens": 1500000,
+    "max_cost_usd": 0.5,
+    "max_output_tokens": 8000
+  },
+  "operator_note": null,
+  "stop_reason": "finished",
+  "model_calls": 14,
+  "usage": {
+    "input_tokens": 128633,
+    "cached_tokens": 100157,
+    "output_tokens": 4907,
+    "reasoning_tokens": 2102,
+    "total_tokens": 133540
+  },
+  "cost_usd": 0.071473,
+  "report": {
+    "verdict": "iso_compliant",
+    "explanation": "ISO coverage met with 10 accepted positions (5 near, 5 far per axis). Waist at ~120.2 mm inside stage, no general astigmatism, M² >1. Caustic fits are low residual and well determined.",
+    "evaluation": {
+      "status": "ok",
+      "accepted_positions": 10,
+      "x": {
+        "fit_success": true,
+        "not_determined": null,
+        "waist_side": null,
+        "waist_gap_mm": null,
+        "d0_um": 199.5,
+        "d0_std_um": 0.24,
+        "z0_mm": 120.165,
+        "z0_std_mm": 0.055,
+        "theta_mrad": 8.1291,
+        "theta_std_mrad": 0.0085,
+        "z_r_mm": 24.541,
+        "z_r_std_mm": 0.044,
+        "m2": 1.1971,
+        "m2_std": 0.0017,
+        "residual_rms_percent": 0.181,
+        "coverage": {
+          "near": 5,
+          "far": 5,
+          "between": 0,
+          "compliant": true,
+          "summary": "x: 5 within ±1 zR, need 5; 5 beyond 2 zR, need 5"
+        },
+        "waist_accessibility": "inside",
+        "waist_near_stage_end": null,
+        "m2_below_1": false
+      },
+      "y": {
+        "fit_success": true,
+        "not_determined": null,
+        "waist_side": null,
+        "waist_gap_mm": null,
+        "d0_um": 209.44,
+        "d0_std_um": 0.23,
+        "z0_mm": 120.164,
+        "z0_std_mm": 0.054,
+        "theta_mrad": 8.0648,
+        "theta_std_mrad": 0.0079,
+        "z_r_mm": 25.969,
+        "z_r_std_mm": 0.043,
+        "m2": 1.2468,
+        "m2_std": 0.0016,
+        "residual_rms_percent": 0.168,
+        "coverage": {
+          "near": 5,
+          "far": 5,
+          "between": 0,
+          "compliant": true,
+          "summary": "y: 5 within ±1 zR, need 5; 5 beyond 2 zR, need 5"
+        },
+        "waist_accessibility": "inside",
+        "waist_near_stage_end": null,
+        "m2_below_1": false
+      },
+      "iso_coverage_met": true,
+      "general_astigmatism": false,
+      "axes_not_aligned": false,
+      "m2_below_1": false,
+      "table": [
+        {
+          "id": "m1",
+          "z_mm": 0.0,
+          "d_x_um": 1024.3,
+          "d_y_um": 1018.9,
+          "status": "reject",
+          "suggested": "reject",
+          "flags": [
+            "low_signal",
+            "roi_clipped"
+          ]
+        },
+        {
+          "id": "m2",
+          "z_mm": 125.0,
+          "d_x_um": 221.2,
+          "d_y_um": 231.7,
+          "status": "reject",
+          "suggested": "reject",
+          "flags": [
+            "saturated"
+          ]
+        },
+        {
+          "id": "m3",
+          "z_mm": 250.0,
+          "d_x_um": 1080.5,
+          "d_y_um": 1073.8,
+          "status": "reject",
+          "suggested": "reject",
+          "flags": [
+            "low_signal",
+            "roi_clipped"
+          ]
+        },
+        {
+          "id": "m4",
+          "z_mm": 125.0,
+          "d_x_um": 207.3,
+          "d_y_um": 217.4,
+          "status": "reject",
+          "suggested": "reject",
+          "flags": [
+            "saturated"
+          ]
+        },
+        {
+          "id": "m5",
+          "z_mm": 0.0,
+          "d_x_um": 997.6,
+          "d_y_um": 991.6,
+          "status": "accept",
+          "suggested": "accept",
+          "flags": [
+            "roi_clipped"
+          ]
+        },
+        {
+          "id": "m6",
+          "z_mm": 250.0,
+          "d_x_um": 1074.1,
+          "d_y_um": 1068.2,
+          "status": "accept",
+          "suggested": "accept",
+          "flags": [
+            "roi_clipped",
+            "background_changed"
+          ]
+        },
+        {
+          "id": "m7",
+          "z_mm": 125.0,
+          "d_x_um": 202.7,
+          "d_y_um": 212.6,
+          "status": "accept",
+          "suggested": "accept",
+          "flags": [
+            "background_changed"
+          ]
+        },
+        {
+          "id": "m8",
+          "z_mm": 110.0,
+          "d_x_um": 216.4,
+          "d_y_um": 225.5,
+          "status": "accept",
+          "suggested": "accept",
+          "flags": []
+        },
+        {
+          "id": "m9",
+          "z_mm": 115.0,
+          "d_x_um": 204.0,
+          "d_y_um": 213.5,
+          "status": "accept",
+          "suggested": "accept",
+          "flags": []
+        },
+        {
+          "id": "m10",
+          "z_mm": 135.0,
+          "d_x_um": 232.7,
+          "d_y_um": 240.7,
+          "status": "accept",
+          "suggested": "accept",
+          "flags": []
+        },
+        {
+          "id": "m11",
+          "z_mm": 140.0,
+          "d_x_um": 257.3,
+          "d_y_um": 264.2,
+          "status": "accept",
+          "suggested": "accept",
+          "flags": []
+        },
+        {
+          "id": "m12",
+          "z_mm": 30.0,
+          "d_x_um": 759.7,
+          "d_y_um": 756.9,
+          "status": "accept",
+          "suggested": "accept",
+          "flags": []
+        },
+        {
+          "id": "m13",
+          "z_mm": 50.0,
+          "d_x_um": 602.9,
+          "d_y_um": 602.0,
+          "status": "accept",
+          "suggested": "accept",
+          "flags": []
+        },
+        {
+          "id": "m14",
+          "z_mm": 195.0,
+          "d_x_um": 640.6,
+          "d_y_um": 639.3,
+          "status": "accept",
+          "suggested": "accept",
+          "flags": []
+        }
+      ]
+    },
+    "positions_measured": 14,
+    "positions_accepted": 10,
+    "positions_rejected": 4,
+    "positions_pending": 0
+  },
+  "steps": [
+    {
+      "call": 1,
+      "status": "completed",
+      "latency_s": 1.07,
+      "usage": {
+        "input_tokens": 3240,
+        "cached_tokens": 3185,
+        "output_tokens": 89,
+        "reasoning_tokens": 7
+      },
+      "cost_usd": 0.000925,
+      "text": "Starting your ISO M² run — first I’ll check the bench setup and then hunt for the beam waist.",
+      "tool_calls": [
+        {
+          "name": "get_setup",
+          "arguments": {
+            "reason": "get setup parameters"
+          },
+          "reason": "get setup parameters",
+          "result": {
+            "wavelength_nm": 1064.0,
+            "stage_range_mm": [
+              0.0,
+              250.0
+            ],
+            "pixel_size_um": 5.5,
+            "sensor_px": [
+              512,
+              512
+            ],
+            "sensor_size_mm": [
+              2.816,
+              2.816
+            ],
+            "full_scale_counts": 4095,
+            "exposure_range_ms": [
+              0.01,
+              200.0
+            ],
+            "repeats_per_position": 5,
+            "max_positions": 20,
+            "positions_left": 20,
+            "min_beam_width_um": 110.0
+          }
+        }
+      ]
+    },
+    {
+      "call": 2,
+      "status": "completed",
+      "latency_s": 1.806,
+      "usage": {
+        "input_tokens": 3471,
+        "cached_tokens": 3185,
+        "output_tokens": 371,
+        "reasoning_tokens": 97
+      },
+      "cost_usd": 0.002412,
+      "text": "Scouting the stage to locate the waist.",
+      "tool_calls": [
+        {
+          "name": "measure_at",
+          "arguments": {
+            "z_mm": 0.0,
+            "exposure_ms": 5.0,
+            "reason": "scout low end"
+          },
+          "reason": "scout low end",
+          "result": {
+            "measurement_id": "m1",
+            "z_mm": 0.0,
+            "exposure_ms": 5.0,
+            "d_x_um": {
+              "mean": 1024.3,
+              "std": 40.0
+            },
+            "d_y_um": {
+              "mean": 1018.9,
+              "std": 44.2
+            },
+            "status": "pending",
+            "positions_left": 19,
+            "flags": {
+              "saturated": false,
+              "low_signal": true,
+              "clipping_loss": false,
+              "too_few_pixels": false,
+              "not_converged": false,
+              "roi_clipped": true,
+              "beam_in_corners": false,
+              "background_changed": false,
+              "axes_not_aligned": false
+            },
+            "suggested_verdict": "reject",
+            "reasons": [
+              "low signal: peak below 500 counts, use a longer exposure"
+            ],
+            "warnings": [
+              "the 3 x d integration area is cut by the sensor edge (estimated clipping loss below 1 %)"
+            ],
+            "details": {
+              "peak_counts": 447.0,
+              "saturated_pixel_fraction": 0.0,
+              "residual_offset_counts": -0.129,
+              "max_offset_sigma": 2.8,
+              "clipping_loss_percent": 0.0,
+              "pixels_across": 185.3,
+              "centroid_um": [
+                0.3,
+                0.2
+              ],
+              "ellipticity": 0.99,
+              "azimuth_deg": 1.9,
+              "misalignment_deg": 0.0
+            }
+          }
+        },
+        {
+          "name": "measure_at",
+          "arguments": {
+            "z_mm": 125.0,
+            "exposure_ms": 5.0,
+            "reason": "scout mid"
+          },
+          "reason": "scout mid",
+          "result": {
+            "measurement_id": "m2",
+            "z_mm": 125.0,
+            "exposure_ms": 5.0,
+            "d_x_um": {
+              "mean": 221.2,
+              "std": 0.7
+            },
+            "d_y_um": {
+              "mean": 231.7,
+              "std": 0.7
+            },
+            "status": "pending",
+            "positions_left": 18,
+            "flags": {
+              "saturated": true,
+              "low_signal": false,
+              "clipping_loss": false,
+              "too_few_pixels": false,
+              "not_converged": false,
+              "roi_clipped": false,
+              "beam_in_corners": false,
+              "background_changed": false,
+              "axes_not_aligned": false
+            },
+            "suggested_verdict": "reject",
+            "reasons": [
+              "saturated: pixels at full scale, use a shorter exposure"
+            ],
+            "warnings": [],
+            "details": {
+              "peak_counts": 3997.0,
+              "saturated_pixel_fraction": 0.00172,
+              "residual_offset_counts": 0.013,
+              "max_offset_sigma": 1.7,
+              "clipping_loss_percent": 0.0,
+              "pixels_across": 40.2,
+              "centroid_um": [
+                0.0,
+                0.0
+              ],
+              "ellipticity": 0.955,
+              "azimuth_deg": 88.2,
+              "misalignment_deg": 0.0
+            }
+          }
+        },
+        {
+          "name": "measure_at",
+          "arguments": {
+            "z_mm": 250.0,
+            "exposure_ms": 5.0,
+            "reason": "scout high end"
+          },
+          "reason": "scout high end",
+          "result": {
+            "measurement_id": "m3",
+            "z_mm": 250.0,
+            "exposure_ms": 5.0,
+            "d_x_um": {
+              "mean": 1080.5,
+              "std": 39.2
+            },
+            "d_y_um": {
+              "mean": 1073.8,
+              "std": 42.5
+            },
+            "status": "pending",
+            "positions_left": 17,
+            "flags": {
+              "saturated": false,
+              "low_signal": true,
+              "clipping_loss": false,
+              "too_few_pixels": false,
+              "not_converged": false,
+              "roi_clipped": true,
+              "beam_in_corners": false,
+              "background_changed": false,
+              "axes_not_aligned": false
+            },
+            "suggested_verdict": "reject",
+            "reasons": [
+              "low signal: peak below 500 counts, use a longer exposure"
+            ],
+            "warnings": [
+              "the 3 x d integration area is cut by the sensor edge (estimated clipping loss below 1 %)"
+            ],
+            "details": {
+              "peak_counts": 391.0,
+              "saturated_pixel_fraction": 0.0,
+              "residual_offset_counts": -0.029,
+              "max_offset_sigma": 1.6,
+              "clipping_loss_percent": 0.0,
+              "pixels_across": 195.2,
+              "centroid_um": [
+                -0.3,
+                -0.1
+              ],
+              "ellipticity": 0.992,
+              "azimuth_deg": 9.8,
+              "misalignment_deg": 0.0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "call": 3,
+      "status": "completed",
+      "latency_s": 3.492,
+      "usage": {
+        "input_tokens": 4827,
+        "cached_tokens": 3441,
+        "output_tokens": 518,
+        "reasoning_tokens": 253
+      },
+      "cost_usd": 0.00445,
+      "text": "",
+      "tool_calls": [
+        {
+          "name": "measure_at",
+          "arguments": {
+            "z_mm": 125.0,
+            "exposure_ms": 3.0,
+            "reason": "rescale waist exposure down"
+          },
+          "reason": "rescale waist exposure down",
+          "result": {
+            "measurement_id": "m4",
+            "z_mm": 125.0,
+            "exposure_ms": 3.0,
+            "d_x_um": {
+              "mean": 207.3,
+              "std": 0.4
+            },
+            "d_y_um": {
+              "mean": 217.4,
+              "std": 0.4
+            },
+            "status": "pending",
+            "positions_left": 16,
+            "flags": {
+              "saturated": true,
+              "low_signal": false,
+              "clipping_loss": false,
+              "too_few_pixels": false,
+              "not_converged": false,
+              "roi_clipped": false,
+              "beam_in_corners": false,
+              "background_changed": false,
+              "axes_not_aligned": false
+            },
+            "suggested_verdict": "reject",
+            "reasons": [
+              "saturated: pixels at full scale, use a shorter exposure"
+            ],
+            "warnings": [],
+            "details": {
+              "peak_counts": 3997.0,
+              "saturated_pixel_fraction": 0.000622,
+              "residual_offset_counts": -0.05,
+              "max_offset_sigma": 0.9,
+              "clipping_loss_percent": 0.0,
+              "pixels_across": 37.7,
+              "centroid_um": [
+                0.0,
+                0.0
+              ],
+              "ellipticity": 0.953,
+              "azimuth_deg": -87.9,
+              "misalignment_deg": 0.0
+            }
+          }
+        },
+        {
+          "name": "measure_at",
+          "arguments": {
+            "z_mm": 0.0,
+            "exposure_ms": 30.0,
+            "reason": "rescale far low end exposure up"
+          },
+          "reason": "rescale far low end exposure up",
+          "result": {
+            "measurement_id": "m5",
+            "z_mm": 0.0,
+            "exposure_ms": 30.0,
+            "d_x_um": {
+              "mean": 997.6,
+              "std": 6.4
+            },
+            "d_y_um": {
+              "mean": 991.6,
+              "std": 6.4
+            },
+            "status": "pending",
+            "positions_left": 15,
+            "flags": {
+              "saturated": false,
+              "low_signal": false,
+              "clipping_loss": false,
+              "too_few_pixels": false,
+              "not_converged": false,
+              "roi_clipped": true,
+              "beam_in_corners": false,
+              "background_changed": false,
+              "axes_not_aligned": false
+            },
+            "suggested_verdict": "accept",
+            "reasons": [],
+            "warnings": [
+              "the 3 x d integration area is cut by the sensor edge (estimated clipping loss below 1 %)"
+            ],
+            "details": {
+              "peak_counts": 2465.0,
+              "saturated_pixel_fraction": 0.0,
+              "residual_offset_counts": -0.045,
+              "max_offset_sigma": 1.7,
+              "clipping_loss_percent": 0.0,
+              "pixels_across": 180.3,
+              "centroid_um": [
+                0.1,
+                -0.0
+              ],
+              "ellipticity": 0.994,
+              "azimuth_deg": 1.9,
+              "misalignment_deg": 0.0
+            }
+          }
+        },
+        {
+          "name": "measure_at",
+          "arguments": {
+            "z_mm": 250.0,
+            "exposure_ms": 30.0,
+            "reason": "rescale far high end exposure up"
+          },
+          "reason": "rescale far high end exposure up",
+          "result": {
+            "measurement_id": "m6",
+            "z_mm": 250.0,
+            "exposure_ms": 30.0,
+            "d_x_um": {
+              "mean": 1074.1,
+              "std": 4.2
+            },
+            "d_y_um": {
+              "mean": 1068.2,
+              "std": 4.0
+            },
+            "status": "pending",
+            "positions_left": 14,
+            "flags": {
+              "saturated": false,
+              "low_signal": false,
+              "clipping_loss": false,
+              "too_few_pixels": false,
+              "not_converged": false,
+              "roi_clipped": true,
+              "beam_in_corners": false,
+              "background_changed": true,
+              "axes_not_aligned": false
+            },
+            "suggested_verdict": "accept",
+            "reasons": [],
+            "warnings": [
+              "the 3 x d integration area is cut by the sensor edge (estimated clipping loss below 1 %)",
+              "background differs from the dark frames (corrected by the corner offset, but check the setup)"
+            ],
+            "details": {
+              "peak_counts": 2120.0,
+              "saturated_pixel_fraction": 0.0,
+              "residual_offset_counts": 3.025,
+              "max_offset_sigma": 22.8,
+              "clipping_loss_percent": 0.0,
+              "pixels_across": 194.2,
+              "centroid_um": [
+                -0.1,
+                0.0
+              ],
+              "ellipticity": 0.995,
+              "azimuth_deg": 4.3,
+              "misalignment_deg": 0.0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "call": 4,
+      "status": "completed",
+      "latency_s": 2.492,
+      "usage": {
+        "input_tokens": 6323,
+        "cached_tokens": 4721,
+        "output_tokens": 591,
+        "reasoning_tokens": 107
+      },
+      "cost_usd": 0.005222,
+      "text": "",
+      "tool_calls": [
+        {
+          "name": "set_status",
+          "arguments": {
+            "measurement_id": "m1",
+            "status": "reject",
+            "reason": "low signal reject scout"
+          },
+          "reason": "low signal reject scout",
+          "result": {
+            "measurement_id": "m1",
+            "status": "reject",
+            "accepted_count": 0
+          }
+        },
+        {
+          "name": "set_status",
+          "arguments": {
+            "measurement_id": "m2",
+            "status": "reject",
+            "reason": "saturated"
+          },
+          "reason": "saturated",
+          "result": {
+            "measurement_id": "m2",
+            "status": "reject",
+            "accepted_count": 0
+          }
+        },
+        {
+          "name": "set_status",
+          "arguments": {
+            "measurement_id": "m3",
+            "status": "reject",
+            "reason": "low signal"
+          },
+          "reason": "low signal",
+          "result": {
+            "measurement_id": "m3",
+            "status": "reject",
+            "accepted_count": 0
+          }
+        },
+        {
+          "name": "set_status",
+          "arguments": {
+            "measurement_id": "m4",
+            "status": "reject",
+            "reason": "still saturated"
+          },
+          "reason": "still saturated",
+          "result": {
+            "measurement_id": "m4",
+            "status": "reject",
+            "accepted_count": 0
+          }
+        },
+        {
+          "name": "set_status",
+          "arguments": {
+            "measurement_id": "m5",
+            "status": "accept",
+            "reason": "good peak 2465"
+          },
+          "reason": "good peak 2465",
+          "result": {
+            "measurement_id": "m5",
+            "status": "accept",
+            "accepted_count": 1
+          }
+        },
+        {
+          "name": "set_status",
+          "arguments": {
+            "measurement_id": "m6",
+            "status": "accept",
+            "reason": "good peak 2120 roi clipped but <1%"
+          },
+          "reason": "good peak 2120 roi clipped but <1%",
+          "result": {
+            "measurement_id": "m6",
+            "status": "accept",
+            "accepted_count": 2
+          }
+        }
+      ]
+    },
+    {
+      "call": 5,
+      "status": "completed",
+      "latency_s": 1.577,
+      "usage": {
+        "input_tokens": 7163,
+        "cached_tokens": 0,
+        "output_tokens": 132,
+        "reasoning_tokens": 43
+      },
+      "cost_usd": 0.009515,
+      "text": "",
+      "tool_calls": [
+        {
+          "name": "measure_at",
+          "arguments": {
+            "z_mm": 125.0,
+            "exposure_ms": 1.5,
+            "reason": "reduce further to avoid saturation"
+          },
+          "reason": "reduce further to avoid saturation",
+          "result": {
+            "measurement_id": "m7",
+            "z_mm": 125.0,
+            "exposure_ms": 1.5,
+            "d_x_um": {
+              "mean": 202.7,
+              "std": 0.8
+            },
+            "d_y_um": {
+              "mean": 212.6,
+              "std": 0.8
+            },
+            "status": "pending",
+            "positions_left": 13,
+            "flags": {
+              "saturated": false,
+              "low_signal": false,
+              "clipping_loss": false,
+              "too_few_pixels": false,
+              "not_converged": false,
+              "roi_clipped": false,
+              "beam_in_corners": false,
+              "background_changed": true,
+              "axes_not_aligned": false
+            },
+            "suggested_verdict": "accept",
+            "reasons": [],
+            "warnings": [
+              "background differs from the dark frames (corrected by the corner offset, but check the setup)"
+            ],
+            "details": {
+              "peak_counts": 2707.0,
+              "saturated_pixel_fraction": 0.0,
+              "residual_offset_counts": 3.124,
+              "max_offset_sigma": 22.9,
+              "clipping_loss_percent": 0.0,
+              "pixels_across": 36.9,
+              "centroid_um": [
+                0.0,
+                0.0
+              ],
+              "ellipticity": 0.953,
+              "azimuth_deg": 84.2,
+              "misalignment_deg": 0.0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "call": 6,
+      "status": "completed",
+      "latency_s": 1.228,
+      "usage": {
+        "input_tokens": 7615,
+        "cached_tokens": 6257,
+        "output_tokens": 184,
+        "reasoning_tokens": 45
+      },
+      "cost_usd": 0.003418,
+      "text": "",
+      "tool_calls": [
+        {
+          "name": "set_status",
+          "arguments": {
+            "measurement_id": "m7",
+            "status": "accept",
+            "reason": "good peak 2707 no saturation"
+          },
+          "reason": "good peak 2707 no saturation",
+          "result": {
+            "measurement_id": "m7",
+            "status": "accept",
+            "accepted_count": 3
+          }
+        },
+        {
+          "name": "retake_darks",
+          "arguments": {
+            "reason": "background changed flagged"
+          },
+          "reason": "background changed flagged",
+          "result": {
+            "dark_frames": 50,
+            "dark_sets_taken": 2,
+            "mean_dark_counts": 103.0,
+            "positions_left": 12
+          }
+        }
+      ]
+    },
+    {
+      "call": 7,
+      "status": "completed",
+      "latency_s": 1.017,
+      "usage": {
+        "input_tokens": 7900,
+        "cached_tokens": 7537,
+        "output_tokens": 75,
+        "reasoning_tokens": 23
+      },
+      "cost_usd": 0.001903,
+      "text": "",
+      "tool_calls": [
+        {
+          "name": "evaluate",
+          "arguments": {
+            "reason": "estimate z0 zR"
+          },
+          "reason": "estimate z0 zR",
+          "result": {
+            "status": "not_enough_data",
+            "message": "3 accepted position(s); the caustic fit needs at least 4. ISO 11146-1 asks for at least 10: about 5 within one Rayleigh length of the waist and 5 beyond two.",
+            "accepted_positions": 3,
+            "table": [
+              {
+                "id": "m1",
+                "z_mm": 0.0,
+                "d_x_um": 1024.3,
+                "d_y_um": 1018.9,
+                "status": "reject",
+                "suggested": "reject",
+                "flags": [
+                  "low_signal",
+                  "roi_clipped"
+                ]
+              },
+              {
+                "id": "m2",
+                "z_mm": 125.0,
+                "d_x_um": 221.2,
+                "d_y_um": 231.7,
+                "status": "reject",
+                "suggested": "reject",
+                "flags": [
+                  "saturated"
+                ]
+              },
+              {
+                "id": "m3",
+                "z_mm": 250.0,
+                "d_x_um": 1080.5,
+                "d_y_um": 1073.8,
+                "status": "reject",
+                "suggested": "reject",
+                "flags": [
+                  "low_signal",
+                  "roi_clipped"
+                ]
+              },
+              {
+                "id": "m4",
+                "z_mm": 125.0,
+                "d_x_um": 207.3,
+                "d_y_um": 217.4,
+                "status": "reject",
+                "suggested": "reject",
+                "flags": [
+                  "saturated"
+                ]
+              },
+              {
+                "id": "m5",
+                "z_mm": 0.0,
+                "d_x_um": 997.6,
+                "d_y_um": 991.6,
+                "status": "accept",
+                "suggested": "accept",
+                "flags": [
+                  "roi_clipped"
+                ]
+              },
+              {
+                "id": "m6",
+                "z_mm": 250.0,
+                "d_x_um": 1074.1,
+                "d_y_um": 1068.2,
+                "status": "accept",
+                "suggested": "accept",
+                "flags": [
+                  "roi_clipped",
+                  "background_changed"
+                ]
+              },
+              {
+                "id": "m7",
+                "z_mm": 125.0,
+                "d_x_um": 202.7,
+                "d_y_um": 212.6,
+                "status": "accept",
+                "suggested": "accept",
+                "flags": [
+                  "background_changed"
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "call": 8,
+      "status": "completed",
+      "latency_s": 4.306,
+      "usage": {
+        "input_tokens": 8485,
+        "cached_tokens": 7793,
+        "output_tokens": 1026,
+        "reasoning_tokens": 684
+      },
+      "cost_usd": 0.006394,
+      "text": "",
+      "tool_calls": [
+        {
+          "name": "measure_at",
+          "arguments": {
+            "z_mm": 110.0,
+            "exposure_ms": 1.5,
+            "reason": "near waist +15mm"
+          },
+          "reason": "near waist +15mm",
+          "result": {
+            "measurement_id": "m8",
+            "z_mm": 110.0,
+            "exposure_ms": 1.5,
+            "d_x_um": {
+              "mean": 216.4,
+              "std": 1.5
+            },
+            "d_y_um": {
+              "mean": 225.5,
+              "std": 1.6
+            },
+            "status": "pending",
+            "positions_left": 11,
+            "flags": {
+              "saturated": false,
+              "low_signal": false,
+              "clipping_loss": false,
+              "too_few_pixels": false,
+              "not_converged": false,
+              "roi_clipped": false,
+              "beam_in_corners": false,
+              "background_changed": false,
+              "axes_not_aligned": false
+            },
+            "suggested_verdict": "accept",
+            "reasons": [],
+            "warnings": [],
+            "details": {
+              "peak_counts": 2435.0,
+              "saturated_pixel_fraction": 0.0,
+              "residual_offset_counts": -0.047,
+              "max_offset_sigma": 1.5,
+              "clipping_loss_percent": 0.0,
+              "pixels_across": 39.3,
+              "centroid_um": [
+                -0.0,
+                -0.0
+              ],
+              "ellipticity": 0.959,
+              "azimuth_deg": -85.6,
+              "misalignment_deg": 0.0
+            }
+          }
+        },
+        {
+          "name": "measure_at",
+          "arguments": {
+            "z_mm": 115.0,
+            "exposure_ms": 1.5,
+            "reason": "near waist"
+          },
+          "reason": "near waist",
+          "result": {
+            "measurement_id": "m9",
+            "z_mm": 115.0,
+            "exposure_ms": 1.5,
+            "d_x_um": {
+              "mean": 204.0,
+              "std": 1.2
+            },
+            "d_y_um": {
+              "mean": 213.5,
+              "std": 1.4
+            },
+            "status": "pending",
+            "positions_left": 10,
+            "flags": {
+              "saturated": false,
+              "low_signal": false,
+              "clipping_loss": false,
+              "too_few_pixels": false,
+              "not_converged": false,
+              "roi_clipped": false,
+              "beam_in_corners": false,
+              "background_changed": false,
+              "axes_not_aligned": false
+            },
+            "suggested_verdict": "accept",
+            "reasons": [],
+            "warnings": [],
+            "details": {
+              "peak_counts": 2719.0,
+              "saturated_pixel_fraction": 0.0,
+              "residual_offset_counts": 0.037,
+              "max_offset_sigma": 1.7,
+              "clipping_loss_percent": 0.0,
+              "pixels_across": 37.1,
+              "centroid_um": [
+                0.0,
+                0.1
+              ],
+              "ellipticity": 0.955,
+              "azimuth_deg": -85.6,
+              "misalignment_deg": 0.0
+            }
+          }
+        },
+        {
+          "name": "measure_at",
+          "arguments": {
+            "z_mm": 135.0,
+            "exposure_ms": 1.5,
+            "reason": "near waist other side"
+          },
+          "reason": "near waist other side",
+          "result": {
+            "measurement_id": "m10",
+            "z_mm": 135.0,
+            "exposure_ms": 1.5,
+            "d_x_um": {
+              "mean": 232.7,
+              "std": 1.5
+            },
+            "d_y_um": {
+              "mean": 240.7,
+              "std": 1.9
+            },
+            "status": "pending",
+            "positions_left": 9,
+            "flags": {
+              "saturated": false,
+              "low_signal": false,
+              "clipping_loss": false,
+              "too_few_pixels": false,
+              "not_converged": false,
+              "roi_clipped": false,
+              "beam_in_corners": false,
+              "background_changed": false,
+              "axes_not_aligned": false
+            },
+            "suggested_verdict": "accept",
+            "reasons": [],
+            "warnings": [],
+            "details": {
+              "peak_counts": 2095.0,
+              "saturated_pixel_fraction": 0.0,
+              "residual_offset_counts": 0.119,
+              "max_offset_sigma": 1.9,
+              "clipping_loss_percent": 0.0,
+              "pixels_across": 42.3,
+              "centroid_um": [
+                0.0,
+                -0.1
+              ],
+              "ellipticity": 0.965,
+              "azimuth_deg": 88.4,
+              "misalignment_deg": 0.0
+            }
+          }
+        },
+        {
+          "name": "measure_at",
+          "arguments": {
+            "z_mm": 140.0,
+            "exposure_ms": 1.5,
+            "reason": "near waist far side"
+          },
+          "reason": "near waist far side",
+          "result": {
+            "measurement_id": "m11",
+            "z_mm": 140.0,
+            "exposure_ms": 1.5,
+            "d_x_um": {
+              "mean": 257.3,
+              "std": 3.3
+            },
+            "d_y_um": {
+              "mean": 264.2,
+              "std": 2.8
+            },
+            "status": "pending",
+            "positions_left": 8,
+            "flags": {
+              "saturated": false,
+              "low_signal": false,
+              "clipping_loss": false,
+              "too_few_pixels": false,
+              "not_converged": false,
+              "roi_clipped": false,
+              "beam_in_corners": false,
+              "background_changed": false,
+              "axes_not_aligned": false
+            },
+            "suggested_verdict": "accept",
+            "reasons": [],
+            "warnings": [],
+            "details": {
+              "peak_counts": 1761.0,
+              "saturated_pixel_fraction": 0.0,
+              "residual_offset_counts": 0.029,
+              "max_offset_sigma": 1.5,
+              "clipping_loss_percent": 0.0,
+              "pixels_across": 46.8,
+              "centroid_um": [
+                0.0,
+                0.0
+              ],
+              "ellipticity": 0.974,
+              "azimuth_deg": -83.6,
+              "misalignment_deg": 0.0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "call": 9,
+      "status": "completed",
+      "latency_s": 1.391,
+      "usage": {
+        "input_tokens": 10706,
+        "cached_tokens": 7153,
+        "output_tokens": 327,
+        "reasoning_tokens": 8
+      },
+      "cost_usd": 0.006904,
+      "text": "",
+      "tool_calls": [
+        {
+          "name": "set_status",
+          "arguments": {
+            "measurement_id": "m8",
+            "status": "accept",
+            "reason": "good near waist"
+          },
+          "reason": "good near waist",
+          "result": {
+            "measurement_id": "m8",
+            "status": "accept",
+            "accepted_count": 4
+          }
+        },
+        {
+          "name": "set_status",
+          "arguments": {
+            "measurement_id": "m9",
+            "status": "accept",
+            "reason": "good near waist"
+          },
+          "reason": "good near waist",
+          "result": {
+            "measurement_id": "m9",
+            "status": "accept",
+            "accepted_count": 5
+          }
+        },
+        {
+          "name": "set_status",
+          "arguments": {
+            "measurement_id": "m10",
+            "status": "accept",
+            "reason": "good near waist"
+          },
+          "reason": "good near waist",
+          "result": {
+            "measurement_id": "m10",
+            "status": "accept",
+            "accepted_count": 6
+          }
+        },
+        {
+          "name": "set_status",
+          "arguments": {
+            "measurement_id": "m11",
+            "status": "accept",
+            "reason": "good near waist"
+          },
+          "reason": "good near waist",
+          "result": {
+            "measurement_id": "m11",
+            "status": "accept",
+            "accepted_count": 7
+          }
+        }
+      ]
+    },
+    {
+      "call": 10,
+      "status": "completed",
+      "latency_s": 1.662,
+      "usage": {
+        "input_tokens": 11200,
+        "cached_tokens": 10609,
+        "output_tokens": 102,
+        "reasoning_tokens": 50
+      },
+      "cost_usd": 0.002764,
+      "text": "",
+      "tool_calls": [
+        {
+          "name": "evaluate",
+          "arguments": {
+            "reason": "check coverage after near cluster"
+          },
+          "reason": "check coverage after near cluster",
+          "result": {
+            "status": "ok",
+            "accepted_positions": 7,
+            "x": {
+              "fit_success": true,
+              "not_determined": null,
+              "waist_side": null,
+              "waist_gap_mm": null,
+              "d0_um": 199.5,
+              "d0_std_um": 0.28,
+              "z0_mm": 120.202,
+              "z0_std_mm": 0.075,
+              "theta_mrad": 8.1362,
+              "theta_std_mrad": 0.0146,
+              "z_r_mm": 24.52,
+              "z_r_std_mm": 0.062,
+              "m2": 1.1982,
+              "m2_std": 0.0024,
+              "residual_rms_percent": 0.188,
+              "coverage": {
+                "near": 5,
+                "far": 2,
+                "between": 0,
+                "compliant": false,
+                "summary": "x: 5 within ±1 zR, need 5; 2 beyond 2 zR, need 5"
+              },
+              "waist_accessibility": "inside",
+              "waist_near_stage_end": null,
+              "m2_below_1": false
+            },
+            "y": {
+              "fit_success": true,
+              "not_determined": null,
+              "waist_side": null,
+              "waist_gap_mm": null,
+              "d0_um": 209.45,
+              "d0_std_um": 0.26,
+              "z0_mm": 120.204,
+              "z0_std_mm": 0.073,
+              "theta_mrad": 8.0706,
+              "theta_std_mrad": 0.0132,
+              "z_r_mm": 25.952,
+              "z_r_std_mm": 0.059,
+              "m2": 1.2478,
+              "m2_std": 0.0023,
+              "residual_rms_percent": 0.17,
+              "coverage": {
+                "near": 5,
+                "far": 2,
+                "between": 0,
+                "compliant": false,
+                "summary": "y: 5 within ±1 zR, need 5; 2 beyond 2 zR, need 5"
+              },
+              "waist_accessibility": "inside",
+              "waist_near_stage_end": null,
+              "m2_below_1": false
+            },
+            "iso_coverage_met": false,
+            "general_astigmatism": false,
+            "axes_not_aligned": false,
+            "m2_below_1": false,
+            "table": [
+              {
+                "id": "m1",
+                "z_mm": 0.0,
+                "d_x_um": 1024.3,
+                "d_y_um": 1018.9,
+                "status": "reject",
+                "suggested": "reject",
+                "flags": [
+                  "low_signal",
+                  "roi_clipped"
+                ]
+              },
+              {
+                "id": "m2",
+                "z_mm": 125.0,
+                "d_x_um": 221.2,
+                "d_y_um": 231.7,
+                "status": "reject",
+                "suggested": "reject",
+                "flags": [
+                  "saturated"
+                ]
+              },
+              {
+                "id": "m3",
+                "z_mm": 250.0,
+                "d_x_um": 1080.5,
+                "d_y_um": 1073.8,
+                "status": "reject",
+                "suggested": "reject",
+                "flags": [
+                  "low_signal",
+                  "roi_clipped"
+                ]
+              },
+              {
+                "id": "m4",
+                "z_mm": 125.0,
+                "d_x_um": 207.3,
+                "d_y_um": 217.4,
+                "status": "reject",
+                "suggested": "reject",
+                "flags": [
+                  "saturated"
+                ]
+              },
+              {
+                "id": "m5",
+                "z_mm": 0.0,
+                "d_x_um": 997.6,
+                "d_y_um": 991.6,
+                "status": "accept",
+                "suggested": "accept",
+                "flags": [
+                  "roi_clipped"
+                ]
+              },
+              {
+                "id": "m6",
+                "z_mm": 250.0,
+                "d_x_um": 1074.1,
+                "d_y_um": 1068.2,
+                "status": "accept",
+                "suggested": "accept",
+                "flags": [
+                  "roi_clipped",
+                  "background_changed"
+                ]
+              },
+              {
+                "id": "m7",
+                "z_mm": 125.0,
+                "d_x_um": 202.7,
+                "d_y_um": 212.6,
+                "status": "accept",
+                "suggested": "accept",
+                "flags": [
+                  "background_changed"
+                ]
+              },
+              {
+                "id": "m8",
+                "z_mm": 110.0,
+                "d_x_um": 216.4,
+                "d_y_um": 225.5,
+                "status": "accept",
+                "suggested": "accept",
+                "flags": []
+              },
+              {
+                "id": "m9",
+                "z_mm": 115.0,
+                "d_x_um": 204.0,
+                "d_y_um": 213.5,
+                "status": "accept",
+                "suggested": "accept",
+                "flags": []
+              },
+              {
+                "id": "m10",
+                "z_mm": 135.0,
+                "d_x_um": 232.7,
+                "d_y_um": 240.7,
+                "status": "accept",
+                "suggested": "accept",
+                "flags": []
+              },
+              {
+                "id": "m11",
+                "z_mm": 140.0,
+                "d_x_um": 257.3,
+                "d_y_um": 264.2,
+                "status": "accept",
+                "suggested": "accept",
+                "flags": []
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "call": 11,
+      "status": "completed",
+      "latency_s": 4.607,
+      "usage": {
+        "input_tokens": 12483,
+        "cached_tokens": 8433,
+        "output_tokens": 941,
+        "reasoning_tokens": 671
+      },
+      "cost_usd": 0.010327,
+      "text": "",
+      "tool_calls": [
+        {
+          "name": "measure_at",
+          "arguments": {
+            "z_mm": 30.0,
+            "exposure_ms": 20.0,
+            "reason": "far beyond 2zR low side"
+          },
+          "reason": "far beyond 2zR low side",
+          "result": {
+            "measurement_id": "m12",
+            "z_mm": 30.0,
+            "exposure_ms": 20.0,
+            "d_x_um": {
+              "mean": 759.7,
+              "std": 5.8
+            },
+            "d_y_um": {
+              "mean": 756.9,
+              "std": 5.8
+            },
+            "status": "pending",
+            "positions_left": 7,
+            "flags": {
+              "saturated": false,
+              "low_signal": false,
+              "clipping_loss": false,
+              "too_few_pixels": false,
+              "not_converged": false,
+              "roi_clipped": false,
+              "beam_in_corners": false,
+              "background_changed": false,
+              "axes_not_aligned": false
+            },
+            "suggested_verdict": "accept",
+            "reasons": [],
+            "warnings": [],
+            "details": {
+              "peak_counts": 2802.0,
+              "saturated_pixel_fraction": 0.0,
+              "residual_offset_counts": -0.037,
+              "max_offset_sigma": 1.4,
+              "clipping_loss_percent": 0.0,
+              "pixels_across": 137.6,
+              "centroid_um": [
+                0.0,
+                -0.0
+              ],
+              "ellipticity": 0.996,
+              "azimuth_deg": -5.2,
+              "misalignment_deg": 0.0
+            }
+          }
+        },
+        {
+          "name": "measure_at",
+          "arguments": {
+            "z_mm": 50.0,
+            "exposure_ms": 12.0,
+            "reason": "far beyond 2zR low side"
+          },
+          "reason": "far beyond 2zR low side",
+          "result": {
+            "measurement_id": "m13",
+            "z_mm": 50.0,
+            "exposure_ms": 12.0,
+            "d_x_um": {
+              "mean": 602.9,
+              "std": 3.2
+            },
+            "d_y_um": {
+              "mean": 602.0,
+              "std": 3.2
+            },
+            "status": "pending",
+            "positions_left": 6,
+            "flags": {
+              "saturated": false,
+              "low_signal": false,
+              "clipping_loss": false,
+              "too_few_pixels": false,
+              "not_converged": false,
+              "roi_clipped": false,
+              "beam_in_corners": false,
+              "background_changed": false,
+              "axes_not_aligned": false
+            },
+            "suggested_verdict": "accept",
+            "reasons": [],
+            "warnings": [],
+            "details": {
+              "peak_counts": 2653.0,
+              "saturated_pixel_fraction": 0.0,
+              "residual_offset_counts": -0.0,
+              "max_offset_sigma": 1.4,
+              "clipping_loss_percent": 0.0,
+              "pixels_across": 109.5,
+              "centroid_um": [
+                -0.0,
+                -0.0
+              ],
+              "ellipticity": 0.998,
+              "azimuth_deg": -13.2,
+              "misalignment_deg": 0.0
+            }
+          }
+        },
+        {
+          "name": "measure_at",
+          "arguments": {
+            "z_mm": 195.0,
+            "exposure_ms": 16.0,
+            "reason": "far beyond 2zR high side"
+          },
+          "reason": "far beyond 2zR high side",
+          "result": {
+            "measurement_id": "m14",
+            "z_mm": 195.0,
+            "exposure_ms": 16.0,
+            "d_x_um": {
+              "mean": 640.6,
+              "std": 3.5
+            },
+            "d_y_um": {
+              "mean": 639.3,
+              "std": 3.6
+            },
+            "status": "pending",
+            "positions_left": 5,
+            "flags": {
+              "saturated": false,
+              "low_signal": false,
+              "clipping_loss": false,
+              "too_few_pixels": false,
+              "not_converged": false,
+              "roi_clipped": false,
+              "beam_in_corners": false,
+              "background_changed": false,
+              "axes_not_aligned": false
+            },
+            "suggested_verdict": "accept",
+            "reasons": [],
+            "warnings": [],
+            "details": {
+              "peak_counts": 3127.0,
+              "saturated_pixel_fraction": 0.0,
+              "residual_offset_counts": 0.049,
+              "max_offset_sigma": 1.5,
+              "clipping_loss_percent": 0.0,
+              "pixels_across": 116.2,
+              "centroid_um": [
+                0.0,
+                -0.0
+              ],
+              "ellipticity": 0.998,
+              "azimuth_deg": -2.0,
+              "misalignment_deg": 0.0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "call": 12,
+      "status": "completed",
+      "latency_s": 1.289,
+      "usage": {
+        "input_tokens": 14321,
+        "cached_tokens": 11121,
+        "output_tokens": 299,
+        "reasoning_tokens": 50
+      },
+      "cost_usd": 0.006939,
+      "text": "",
+      "tool_calls": [
+        {
+          "name": "set_status",
+          "arguments": {
+            "measurement_id": "m12",
+            "status": "accept",
+            "reason": "good far peak 2802"
+          },
+          "reason": "good far peak 2802",
+          "result": {
+            "measurement_id": "m12",
+            "status": "accept",
+            "accepted_count": 8
+          }
+        },
+        {
+          "name": "set_status",
+          "arguments": {
+            "measurement_id": "m13",
+            "status": "accept",
+            "reason": "good far peak 2653"
+          },
+          "reason": "good far peak 2653",
+          "result": {
+            "measurement_id": "m13",
+            "status": "accept",
+            "accepted_count": 9
+          }
+        },
+        {
+          "name": "set_status",
+          "arguments": {
+            "measurement_id": "m14",
+            "status": "accept",
+            "reason": "good far peak 3127"
+          },
+          "reason": "good far peak 3127",
+          "result": {
+            "measurement_id": "m14",
+            "status": "accept",
+            "accepted_count": 10
+          }
+        }
+      ]
+    },
+    {
+      "call": 13,
+      "status": "completed",
+      "latency_s": 0.787,
+      "usage": {
+        "input_tokens": 14746,
+        "cached_tokens": 14321,
+        "output_tokens": 64,
+        "reasoning_tokens": 10
+      },
+      "cost_usd": 0.002951,
+      "text": "",
+      "tool_calls": [
+        {
+          "name": "evaluate",
+          "arguments": {
+            "reason": "check ISO coverage after 5 far"
+          },
+          "reason": "check ISO coverage after 5 far",
+          "result": {
+            "status": "ok",
+            "accepted_positions": 10,
+            "x": {
+              "fit_success": true,
+              "not_determined": null,
+              "waist_side": null,
+              "waist_gap_mm": null,
+              "d0_um": 199.5,
+              "d0_std_um": 0.24,
+              "z0_mm": 120.165,
+              "z0_std_mm": 0.055,
+              "theta_mrad": 8.1291,
+              "theta_std_mrad": 0.0085,
+              "z_r_mm": 24.541,
+              "z_r_std_mm": 0.044,
+              "m2": 1.1971,
+              "m2_std": 0.0017,
+              "residual_rms_percent": 0.181,
+              "coverage": {
+                "near": 5,
+                "far": 5,
+                "between": 0,
+                "compliant": true,
+                "summary": "x: 5 within ±1 zR, need 5; 5 beyond 2 zR, need 5"
+              },
+              "waist_accessibility": "inside",
+              "waist_near_stage_end": null,
+              "m2_below_1": false
+            },
+            "y": {
+              "fit_success": true,
+              "not_determined": null,
+              "waist_side": null,
+              "waist_gap_mm": null,
+              "d0_um": 209.44,
+              "d0_std_um": 0.23,
+              "z0_mm": 120.164,
+              "z0_std_mm": 0.054,
+              "theta_mrad": 8.0648,
+              "theta_std_mrad": 0.0079,
+              "z_r_mm": 25.969,
+              "z_r_std_mm": 0.043,
+              "m2": 1.2468,
+              "m2_std": 0.0016,
+              "residual_rms_percent": 0.168,
+              "coverage": {
+                "near": 5,
+                "far": 5,
+                "between": 0,
+                "compliant": true,
+                "summary": "y: 5 within ±1 zR, need 5; 5 beyond 2 zR, need 5"
+              },
+              "waist_accessibility": "inside",
+              "waist_near_stage_end": null,
+              "m2_below_1": false
+            },
+            "iso_coverage_met": true,
+            "general_astigmatism": false,
+            "axes_not_aligned": false,
+            "m2_below_1": false,
+            "table": [
+              {
+                "id": "m1",
+                "z_mm": 0.0,
+                "d_x_um": 1024.3,
+                "d_y_um": 1018.9,
+                "status": "reject",
+                "suggested": "reject",
+                "flags": [
+                  "low_signal",
+                  "roi_clipped"
+                ]
+              },
+              {
+                "id": "m2",
+                "z_mm": 125.0,
+                "d_x_um": 221.2,
+                "d_y_um": 231.7,
+                "status": "reject",
+                "suggested": "reject",
+                "flags": [
+                  "saturated"
+                ]
+              },
+              {
+                "id": "m3",
+                "z_mm": 250.0,
+                "d_x_um": 1080.5,
+                "d_y_um": 1073.8,
+                "status": "reject",
+                "suggested": "reject",
+                "flags": [
+                  "low_signal",
+                  "roi_clipped"
+                ]
+              },
+              {
+                "id": "m4",
+                "z_mm": 125.0,
+                "d_x_um": 207.3,
+                "d_y_um": 217.4,
+                "status": "reject",
+                "suggested": "reject",
+                "flags": [
+                  "saturated"
+                ]
+              },
+              {
+                "id": "m5",
+                "z_mm": 0.0,
+                "d_x_um": 997.6,
+                "d_y_um": 991.6,
+                "status": "accept",
+                "suggested": "accept",
+                "flags": [
+                  "roi_clipped"
+                ]
+              },
+              {
+                "id": "m6",
+                "z_mm": 250.0,
+                "d_x_um": 1074.1,
+                "d_y_um": 1068.2,
+                "status": "accept",
+                "suggested": "accept",
+                "flags": [
+                  "roi_clipped",
+                  "background_changed"
+                ]
+              },
+              {
+                "id": "m7",
+                "z_mm": 125.0,
+                "d_x_um": 202.7,
+                "d_y_um": 212.6,
+                "status": "accept",
+                "suggested": "accept",
+                "flags": [
+                  "background_changed"
+                ]
+              },
+              {
+                "id": "m8",
+                "z_mm": 110.0,
+                "d_x_um": 216.4,
+                "d_y_um": 225.5,
+                "status": "accept",
+                "suggested": "accept",
+                "flags": []
+              },
+              {
+                "id": "m9",
+                "z_mm": 115.0,
+                "d_x_um": 204.0,
+                "d_y_um": 213.5,
+                "status": "accept",
+                "suggested": "accept",
+                "flags": []
+              },
+              {
+                "id": "m10",
+                "z_mm": 135.0,
+                "d_x_um": 232.7,
+                "d_y_um": 240.7,
+                "status": "accept",
+                "suggested": "accept",
+                "flags": []
+              },
+              {
+                "id": "m11",
+                "z_mm": 140.0,
+                "d_x_um": 257.3,
+                "d_y_um": 264.2,
+                "status": "accept",
+                "suggested": "accept",
+                "flags": []
+              },
+              {
+                "id": "m12",
+                "z_mm": 30.0,
+                "d_x_um": 759.7,
+                "d_y_um": 756.9,
+                "status": "accept",
+                "suggested": "accept",
+                "flags": []
+              },
+              {
+                "id": "m13",
+                "z_mm": 50.0,
+                "d_x_um": 602.9,
+                "d_y_um": 602.0,
+                "status": "accept",
+                "suggested": "accept",
+                "flags": []
+              },
+              {
+                "id": "m14",
+                "z_mm": 195.0,
+                "d_x_um": 640.6,
+                "d_y_um": 639.3,
+                "status": "accept",
+                "suggested": "accept",
+                "flags": []
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "call": 14,
+      "status": "completed",
+      "latency_s": 1.765,
+      "usage": {
+        "input_tokens": 16153,
+        "cached_tokens": 12401,
+        "output_tokens": 188,
+        "reasoning_tokens": 54
+      },
+      "cost_usd": 0.007349,
+      "text": "",
+      "tool_calls": [
+        {
+          "name": "finish",
+          "arguments": {
+            "verdict": "iso_compliant",
+            "explanation": "ISO coverage met with 10 accepted positions (5 near, 5 far per axis). Waist at ~120.2 mm inside stage, no general astigmatism, M² >1. Caustic fits are low residual and well determined.",
+            "reason": "coverage met both axes minimal positions"
+          },
+          "reason": "coverage met both axes minimal positions",
+          "result": {
+            "report": {
+              "verdict": "iso_compliant",
+              "explanation": "ISO coverage met with 10 accepted positions (5 near, 5 far per axis). Waist at ~120.2 mm inside stage, no general astigmatism, M² >1. Caustic fits are low residual and well determined.",
+              "evaluation": {
+                "status": "ok",
+                "accepted_positions": 10,
+                "x": {
+                  "fit_success": true,
+                  "not_determined": null,
+                  "waist_side": null,
+                  "waist_gap_mm": null,
+                  "d0_um": 199.5,
+                  "d0_std_um": 0.24,
+                  "z0_mm": 120.165,
+                  "z0_std_mm": 0.055,
+                  "theta_mrad": 8.1291,
+                  "theta_std_mrad": 0.0085,
+                  "z_r_mm": 24.541,
+                  "z_r_std_mm": 0.044,
+                  "m2": 1.1971,
+                  "m2_std": 0.0017,
+                  "residual_rms_percent": 0.181,
+                  "coverage": {
+                    "near": 5,
+                    "far": 5,
+                    "between": 0,
+                    "compliant": true,
+                    "summary": "x: 5 within ±1 zR, need 5; 5 beyond 2 zR, need 5"
+                  },
+                  "waist_accessibility": "inside",
+                  "waist_near_stage_end": null,
+                  "m2_below_1": false
+                },
+                "y": {
+                  "fit_success": true,
+                  "not_determined": null,
+                  "waist_side": null,
+                  "waist_gap_mm": null,
+                  "d0_um": 209.44,
+                  "d0_std_um": 0.23,
+                  "z0_mm": 120.164,
+                  "z0_std_mm": 0.054,
+                  "theta_mrad": 8.0648,
+                  "theta_std_mrad": 0.0079,
+                  "z_r_mm": 25.969,
+                  "z_r_std_mm": 0.043,
+                  "m2": 1.2468,
+                  "m2_std": 0.0016,
+                  "residual_rms_percent": 0.168,
+                  "coverage": {
+                    "near": 5,
+                    "far": 5,
+                    "between": 0,
+                    "compliant": true,
+                    "summary": "y: 5 within ±1 zR, need 5; 5 beyond 2 zR, need 5"
+                  },
+                  "waist_accessibility": "inside",
+                  "waist_near_stage_end": null,
+                  "m2_below_1": false
+                },
+                "iso_coverage_met": true,
+                "general_astigmatism": false,
+                "axes_not_aligned": false,
+                "m2_below_1": false,
+                "table": [
+                  {
+                    "id": "m1",
+                    "z_mm": 0.0,
+                    "d_x_um": 1024.3,
+                    "d_y_um": 1018.9,
+                    "status": "reject",
+                    "suggested": "reject",
+                    "flags": [
+                      "low_signal",
+                      "roi_clipped"
+                    ]
+                  },
+                  {
+                    "id": "m2",
+                    "z_mm": 125.0,
+                    "d_x_um": 221.2,
+                    "d_y_um": 231.7,
+                    "status": "reject",
+                    "suggested": "reject",
+                    "flags": [
+                      "saturated"
+                    ]
+                  },
+                  {
+                    "id": "m3",
+                    "z_mm": 250.0,
+                    "d_x_um": 1080.5,
+                    "d_y_um": 1073.8,
+                    "status": "reject",
+                    "suggested": "reject",
+                    "flags": [
+                      "low_signal",
+                      "roi_clipped"
+                    ]
+                  },
+                  {
+                    "id": "m4",
+                    "z_mm": 125.0,
+                    "d_x_um": 207.3,
+                    "d_y_um": 217.4,
+                    "status": "reject",
+                    "suggested": "reject",
+                    "flags": [
+                      "saturated"
+                    ]
+                  },
+                  {
+                    "id": "m5",
+                    "z_mm": 0.0,
+                    "d_x_um": 997.6,
+                    "d_y_um": 991.6,
+                    "status": "accept",
+                    "suggested": "accept",
+                    "flags": [
+                      "roi_clipped"
+                    ]
+                  },
+                  {
+                    "id": "m6",
+                    "z_mm": 250.0,
+                    "d_x_um": 1074.1,
+                    "d_y_um": 1068.2,
+                    "status": "accept",
+                    "suggested": "accept",
+                    "flags": [
+                      "roi_clipped",
+                      "background_changed"
+                    ]
+                  },
+                  {
+                    "id": "m7",
+                    "z_mm": 125.0,
+                    "d_x_um": 202.7,
+                    "d_y_um": 212.6,
+                    "status": "accept",
+                    "suggested": "accept",
+                    "flags": [
+                      "background_changed"
+                    ]
+                  },
+                  {
+                    "id": "m8",
+                    "z_mm": 110.0,
+                    "d_x_um": 216.4,
+                    "d_y_um": 225.5,
+                    "status": "accept",
+                    "suggested": "accept",
+                    "flags": []
+                  },
+                  {
+                    "id": "m9",
+                    "z_mm": 115.0,
+                    "d_x_um": 204.0,
+                    "d_y_um": 213.5,
+                    "status": "accept",
+                    "suggested": "accept",
+                    "flags": []
+                  },
+                  {
+                    "id": "m10",
+                    "z_mm": 135.0,
+                    "d_x_um": 232.7,
+                    "d_y_um": 240.7,
+                    "status": "accept",
+                    "suggested": "accept",
+                    "flags": []
+                  },
+                  {
+                    "id": "m11",
+                    "z_mm": 140.0,
+                    "d_x_um": 257.3,
+                    "d_y_um": 264.2,
+                    "status": "accept",
+                    "suggested": "accept",
+                    "flags": []
+                  },
+                  {
+                    "id": "m12",
+                    "z_mm": 30.0,
+                    "d_x_um": 759.7,
+                    "d_y_um": 756.9,
+                    "status": "accept",
+                    "suggested": "accept",
+                    "flags": []
+                  },
+                  {
+                    "id": "m13",
+                    "z_mm": 50.0,
+                    "d_x_um": 602.9,
+                    "d_y_um": 602.0,
+                    "status": "accept",
+                    "suggested": "accept",
+                    "flags": []
+                  },
+                  {
+                    "id": "m14",
+                    "z_mm": 195.0,
+                    "d_x_um": 640.6,
+                    "d_y_um": 639.3,
+                    "status": "accept",
+                    "suggested": "accept",
+                    "flags": []
+                  }
+                ]
+              },
+              "positions_measured": 14,
+              "positions_accepted": 10,
+              "positions_rejected": 4,
+              "positions_pending": 0
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
