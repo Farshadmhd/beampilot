@@ -320,5 +320,10 @@ def test_fine_offset_removes_residual_background() -> None:
     assert info.std_counts == pytest.approx(
         CAMERA.read_noise_counts * np.sqrt(1 + 1 / 10), rel=0.1
     )
+    # 4 corner patches of 18 x 18 px on a 512 x 512 image.
+    n_corner = 4 * 18 * 18
+    assert info.offset_std_err_counts == pytest.approx(
+        info.std_counts / np.sqrt(n_corner)
+    )
     assert len(info.corner_means_counts) == 4
     assert image.mean() == pytest.approx(0.0, abs=CORNER_MEAN_TOL)

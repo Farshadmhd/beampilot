@@ -28,7 +28,13 @@ class BackgroundInfo:
         This value was subtracted from the whole image.
     std_counts : float
         Standard deviation of the corner pixels after dark subtraction, in
-        counts (pixel noise of the background).
+        counts. This is the noise of a single pixel, not the uncertainty of
+        `offset_counts`.
+    offset_std_err_counts : float
+        Standard error of `offset_counts` in counts, ``std_counts / sqrt(N)``
+        for N corner pixels (assumes independent pixel noise). Because the
+        offset is subtracted from every pixel, this error enters the second
+        moments as a residual background.
     corner_means_counts : tuple of float
         Mean of each corner patch in counts, ordered top-left, top-right,
         bottom-left, bottom-right. A spread between them indicates a
@@ -37,6 +43,7 @@ class BackgroundInfo:
 
     offset_counts: float
     std_counts: float
+    offset_std_err_counts: float
     corner_means_counts: tuple[float, float, float, float]
 
 
@@ -124,9 +131,11 @@ def subtract_background(
     )
     corner_pixels = np.concatenate([c.ravel() for c in corners])
     offset = float(corner_pixels.mean())
+    std = float(corner_pixels.std())
     info = BackgroundInfo(
         offset_counts=offset,
-        std_counts=float(corner_pixels.std()),
+        std_counts=std,
+        offset_std_err_counts=std / np.sqrt(corner_pixels.size),
         corner_means_counts=tuple(float(c.mean()) for c in corners),
     )
     return image - offset, info
@@ -318,6 +327,14 @@ def measure_widths(
     Widths are measured along the lab x and y axes, not along the principal
     axes. The design assumes beams aligned to x/y; for a rotated beam use
     `azimuth_rad` and `ellipticity` to detect it.
+
+    Widths become unreliable at low peak signal (low SNR): background noise
+    and the residual offset inside the 3 * d rectangle are weighted by the
+    squared distance from the centroid. For example, at a peak of ~430 counts
+    with 5 counts read noise, single-frame widths scatter by ~5 % (1 sigma).
+    This function does not check the signal level; a quality flag (peak /
+    full scale) in the measurement tool will. ``converged`` only says the
+    iteration settled, not that the widths are accurate.
 
     Parameters
     ----------
