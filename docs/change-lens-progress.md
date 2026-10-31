@@ -17,6 +17,8 @@ Branch `add-change-lens` (not merged). Design: [change-lens-design.md](change-le
 | E2 | `bc6def7` | Collapsed far-field fit: planned from θ and z0 with M² in [1, 2], labelled. |
 | R1 | `4389598` | A clip refusal (truth-based) costs one position. |
 | v3 setup | `6fda336` | `scripts/v3_cases.py`: L1–L8 with 28 positions, the oracle with lenses (incl. `measurement_failed`), the recorded L8 choice. |
+| Scout fix | `bf54e93` | After a lens, at least 4 distinct scouts (missing ones step into the stage from a clipped end). |
+| L8 margin | `4336058` | L8 re-selected with a 27-corner margin: waist +260 mm, d0 130 µm, M² 1.0. |
 
 Tests: see the latest commit (`.venv\Scripts\python.exe -m pytest`).
 
@@ -33,6 +35,26 @@ Tests: see the latest commit (`.venv\Scripts\python.exe -m pytest`).
   - `docs/evaluation-plan-v3.md`, committed and pushed before any run on seeds
     900–907 (STOP 2).
 - **Phase 5**: UI and replay, README section, CLAUDE.md note (STOP 3).
+
+## Margin of the v3 cases (31 Oct 2026)
+
+Computed by `scripts/v3_cases.py` (`margin_report`), from the true beam:
+- **Feasible lenses:** the kit × rail lenses that work.
+- **Best lens:** the one with the largest spare margin; ties go to the larger |f|,
+  then to the lens closer to the stage.
+- **Corners:** at how many of the 27 corners (z0 ±10 mm, d0 ±10 %, M² ±10 %) the
+  best lens still works.
+
+| Case | Waist (mm) | d0 (µm) | M² | Feasible lenses | Best lens | Corners | Margin |
+|---|---|---|---|---|---|---|---|
+| L1 | −30 | 200 | 1.2 | 1 | −200 mm @ −110 mm | 12/27 | **borderline** |
+| L2 | −60 | 200 | 1.2 | 2 | +25 mm @ −20 mm | 27/27 | ok |
+| L3 | −100 | 250 | 1.4 | 5 | +40 mm @ −20 mm | 27/27 | ok |
+| L4 | −80 | 160 | 1.0 | 6 | +40 mm @ −20 mm | 23/27 | **borderline** |
+| L5 | +280 | 200 | 1.2 | 29 | +750 mm @ −20 mm | 27/27 | ok |
+| L6 | +320 | 300 | 1.6 | 46 | +750 mm @ −20 mm | 27/27 | ok |
+| L7 | +380 | 250 | 1.4 | 29 | +750 mm @ −30 mm | 27/27 | ok |
+| L8 | +260 | 130 | 1.0 | 0 | – | – | no lens at any corner (by selection) |
 
 ## Open issues
 

@@ -271,18 +271,27 @@ remains unchecked, as today.
 
 ## 6. Scripted baseline (fair comparison)
 
-The scripted operator gets the same information as the agent and a fixed rule:
+The scripted operator gets the same information as the agent and a fixed rule
+(state of 31 Oct 2026):
 1. It runs its normal procedure.
-2. If it would end with an axis `outside` (after approaching that stage end, as the
-   guard requires) and the scenario has a lens kit, it takes `evaluate`'s
-   `lens_options`. These are the same Python numbers the agent sees.
-3. It picks the first option by a fixed order: robust over ±2σ first, then the
-   largest minimum near/far room over both axes, then the larger |f|, then the
-   lens closer to the stage.
-4. It calls `change_lens` and restarts its scout and fill procedure on the new
-   segment, with the exposure scaled from the predicted d0'.
-5. If no option is feasible, it finishes `waist_not_accessible`, as today.
-6. At most one lens change; it never tries a second.
+2. If its rules give `waist_not_accessible` (an axis `outside`, after approaching
+   that stage end, as the guard requires) and `evaluate` lists `lens_options`, it
+   takes the **first listed option**. These are the same Python numbers the agent
+   sees, already ranked by the feasible fraction of the fit draws, then the
+   larger spare margin, then the larger |f|, then the lens closer to the stage.
+   There is no minimum fraction (decided 31 Oct 2026).
+3. It calls `change_lens`, then scouts the new beam from the prediction it
+   returns, the same the agent gets:
+   - at z0', ±1 zR' and ±2.5 zR', clipped to the stage;
+   - positions closer than the normal minimum spacing (0.15 zR', at least 1 mm)
+     count once;
+   - if clipping leaves fewer than 4, positions are added stepping into the stage
+     from the clipped end, every max(1 zR', minimum spacing), until there are 4;
+   - the first exposure is scaled from the predicted d0'.
+
+   Then it continues with its normal fill procedure.
+4. If no option is listed, it finishes `waist_not_accessible`, as before.
+5. At most one lens change; it never tries a second.
 
 The naive scan never uses a lens (reference only).
 
@@ -335,25 +344,45 @@ The naive scan never uses a lens (reference only).
 `docs/evaluation-plan-v3.md` will be committed **before any v3 run and after the
 code is merged**, the same way as v1 and v2. v1 and v2 stay unchanged.
 
-**Cases:** 8 waist-outside beams, each with a lens kit and 24 positions (4 more
-than usual, for the lens change and a second scout). Seeds **900–907** (never used
-so far: 0–99, 100, 200–204, 300–304, 500, 600–604, 700–704, 1000–1009 and
-3000–3009 are taken).
+**Cases:** 8 waist-outside beams, each with a lens kit and **28 positions** for
+every contender (decided 31 Oct 2026). Seeds **900–907** (never used so far: 0–99,
+100, 200–204, 300–304, 500, 600–604, 700–704, 1000–1009 and 3000–3009 are
+taken). Definitions and the oracle are in `scripts/v3_cases.py`.
 
-| Case | Waist z0 (mm) | d0 (µm) | M² | Preliminary expected verdict |
+| Case | Waist z0 (mm) | d0 (µm) | M² | Oracle verdict |
 |---|---|---|---|---|
-| L1 | −30 | 200 | 1.2 | iso_compliant (1 option: −200 mm) |
-| L2 | −60 | 200 | 1.2 | iso_compliant (2 options: +25, +40 mm) |
-| L3 | −100 | 250 | 1.4 | iso_compliant (+25, +40 mm) |
-| L4 | −80 | 160 | 1.0 | iso_compliant (−200, +25, +40 mm) |
-| L5 | 280 | 200 | 1.2 | iso_compliant (+750 mm) |
-| L6 | 320 | 300 | 1.6 | iso_compliant (+300, +750 mm) |
-| L7 | 380 | 250 | 1.4 | iso_compliant (+750 mm) |
-| L8 | 450 | 160 | 1.0 | waist_not_accessible (no kit option) |
+| L1 | −30 | 200 | 1.2 | iso_compliant |
+| L2 | −60 | 200 | 1.2 | iso_compliant |
+| L3 | −100 | 250 | 1.4 | iso_compliant |
+| L4 | −80 | 160 | 1.0 | iso_compliant |
+| L5 | 280 | 200 | 1.2 | iso_compliant |
+| L6 | 320 | 300 | 1.6 | iso_compliant |
+| L7 | 380 | 250 | 1.4 | iso_compliant |
+| L8 | 260 | 130 | 1.0 | waist_not_accessible |
 
-The final expected verdicts come from an **oracle with lenses**, applied to the
-true beam and committed in the v3 plan: `iso_compliant` if any kit × rail option
-passes the v1 coverage rule, otherwise `waist_not_accessible`.
+**Oracle with lenses** (applied to the true beam):
+1. `measurement_failed` if fewer than 5 stage positions (5 mm grid) give a usable
+   beam size: at least 20 px across and at most half the smaller sensor side.
+2. Waist inside the stage: the v1 coverage rule (room for 5 near and 5 far points
+   per axis).
+3. Waist outside: `iso_compliant` if any kit × rail lens makes an artificial waist
+   that passes the same rule on both axes (inside the stage, ≥ 20 px, no clipping
+   at the lens), otherwise `waist_not_accessible`.
+
+**L8 selection with margin.** The first L8 (waist at 450 mm) had no usable stage
+position. The second (−20 mm, 230 µm) had no margin, and the scripted dry run hit
+a barely-listed option there. L8 is now chosen by a recorded search:
+- grid: waist −150…−10 mm and 260…500 mm, d0 100…350 µm, M² 1.0…1.8;
+- a candidate needs at least 10 usable stage positions;
+- no kit × rail lens may be feasible for the true beam **and** for all 27 corners
+  of z0 ±10 mm, d0 ±10 %, M² ±10 %;
+- pick the most usable positions.
+
+The result: 87 candidates; L8 at +260 mm, 130 µm, M² 1.0, with 25 usable positions.
+With d0 from 150 µm no candidate kept the margin, so the grid starts at 100 µm.
+
+**Margin of L1–L7** (report only): see `docs/change-lens-progress.md`. L1 and L4
+are borderline: their best lens fails at some of the 27 corners.
 
 **Calibration first.** Before the v3 plan is written, the scripted operator runs
 the 8 beam definitions with **calibration seeds 950–957** (not the v3 seeds), and
