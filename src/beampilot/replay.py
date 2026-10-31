@@ -40,6 +40,8 @@ class RunState:
     model_calls: int = 0
     total_tokens: int = 0
     cost_usd: float = 0.0
+    # Index of the log line that collects consecutive set_status calls.
+    _status_line: int | None = field(default=None, repr=False)
 
     def apply_model_reply(self, step: dict[str, Any]) -> None:
         """Count a model reply (usage and cost) and log its text, if any."""
@@ -57,7 +59,10 @@ class RunState:
         name, result = call["name"], call.get("result") or {}
         arguments = call.get("arguments") or {}
         reason = call.get("reason") or arguments.get("reason") or ""
-        self.log.append(_log_line(name, arguments, reason, result))
+        if name == "set_status":
+            self._log_status(arguments, reason, result)
+        else:
+            self.log.append(_log_line(name, arguments, reason, result))
         if "error" in result or "internal_error" in result:
             return
         if name == "get_setup":
@@ -84,6 +89,44 @@ class RunState:
             self.evaluation = result
         elif name == "finish" and "report" in result:
             self.set_report(result["report"])
+
+    def coverage(self) -> dict[str, tuple[int, int]] | None:
+        """ISO point count per axis: (near, far) distinct accepted positions.
+
+        Uses z0 and zR of the latest fit and the measurements accepted so far,
+        so the count moves as soon as a point is accepted. Near is
+        |z - z0| <= zR, far |z - z0| >= 2 zR, as in ``evaluate``. None before
+        the first fit with z0 and zR on both axes.
+        """
+        evaluation = self.evaluation
+        if not evaluation:
+            return None
+        accepted = {p.z_mm for p in self.points.values() if p.status == "accept"}
+        counts = {}
+        for axis in ("x", "y"):
+            fit = evaluation.get(axis) or {}
+            z0, z_r = fit.get("z0_mm"), fit.get("z_r_mm")
+            if z0 is None or not z_r:
+                return None
+            near = sum(abs(z - z0) <= z_r for z in accepted)
+            far = sum(abs(z - z0) >= 2 * z_r for z in accepted)
+            counts[axis] = (near, far)
+        return counts
+
+    def _log_status(self, arguments: dict, reason: str, result: dict) -> None:
+        """Consecutive set_status calls share one log line."""
+        mid = result.get("measurement_id") or arguments.get("measurement_id", "?")
+        if "error" in result or "internal_error" in result:
+            item = f"{mid} ⚠️ {result.get('error') or result.get('internal_error')}"
+        else:
+            mark = "✅" if result.get("status") == "accept" else "❌"
+            item = f"{mid} {mark} {reason}".rstrip()
+        last = len(self.log) - 1
+        if self._status_line is not None and self._status_line == last:
+            self.log[last] += f" · {item}"
+        else:
+            self.log.append(f"**set_status**: {item}")
+            self._status_line = len(self.log) - 1
 
     def set_report(self, report: dict[str, Any] | None) -> None:
         """Store the final report (from finish or the controller's fallback)."""
@@ -183,6 +226,4 @@ def _log_line(name: str, arguments: dict, reason: str, result: dict) -> str:
         return f"{line}\n  → {', '.join(parts)}, ISO coverage met: {met}"
     if name == "finish" and "report" in result:
         return f"{line}\n  → verdict **{result['report']['verdict']}**"
-    if name == "set_status":
-        return f"{line}\n  → {result.get('measurement_id')} {result.get('status')}"
     return line

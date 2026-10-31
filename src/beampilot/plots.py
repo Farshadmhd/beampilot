@@ -44,7 +44,7 @@ def caustic_figure(
     -------
     matplotlib.figure.Figure
     """
-    fig, ax = plt.subplots(figsize=(7.0, 4.2), dpi=100)
+    fig, ax = plt.subplots(figsize=(10.0, 5.6), dpi=110)
     points = list(state.points.values())
     z_values = [p.z_mm for p in points]
     if stage_range_mm is not None:
@@ -64,7 +64,7 @@ def caustic_figure(
                 z,
                 d0 * np.sqrt(1 + ((z - z0) / z_r) ** 2),
                 color=colour,
-                lw=1.2,
+                lw=1.8,
                 label=f"fit {axis}: M² {fit['m2']}",
             )
             ax.axvspan(z0 - z_r, z0 + z_r, color=colour, alpha=0.08)
@@ -84,18 +84,19 @@ def caustic_figure(
                 [p.z_mm for p in selected],
                 [getattr(p, f"d_{axis}_um") for p in selected],
                 marker=marker,
-                s=36,
+                s=60,
                 color=colour if fill else "none",
                 edgecolors=colour if marker == "o" else None,
                 label=f"d_{axis} {status}",
             )
     ax.set_xlim(z_lo, z_hi)
     ax.set_ylim(bottom=0)
-    ax.set_xlabel("stage position z (mm)")
-    ax.set_ylabel("second-moment diameter (µm)")
-    ax.set_title("Caustic (shaded: ±1 zR, dotted: 2 zR)", fontsize=10)
+    ax.set_xlabel("stage position z (mm)", fontsize=12)
+    ax.set_ylabel("second-moment diameter (µm)", fontsize=12)
+    ax.tick_params(labelsize=11)
+    ax.set_title("Caustic (shaded: ±1 zR, dotted: 2 zR)", fontsize=13)
     if ax.get_legend_handles_labels()[0]:
-        ax.legend(fontsize=7, ncol=2, loc="upper center")
+        ax.legend(fontsize=10, ncol=2, loc="upper center")
     ax.grid(alpha=0.3)
     fig.tight_layout()
     plt.close(fig)  # the caller (Gradio) renders it; free pyplot's reference
