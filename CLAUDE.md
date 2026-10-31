@@ -26,6 +26,11 @@ agent and SAM 3.1 for beam segmentation.
 - Never commit secrets. `.env` is git-ignored; only `.env.example` with a
   placeholder is tracked. Never ask for API keys in chat and never print them.
 
+## Model backends
+- Meta Model API: base URL https://api.meta.ai/v1, key in env var MODEL_API_KEY. Main agent backend.
+- Baseten: base URL https://inference.baseten.co/v1, model exactly "meta-models/muse-spark-open-1026" (Muse Spark Open, Meta open weights). Key in its own env var, listed in .env.example. Optional second backend for comparison.
+- "Baseten" is a company name, not a typo of "baseline". Never remove or rename Baseten entries in .env.example or the code.
+
 ## Data
 - Use simulated beam images (with known ground truth) or openly licensed data
   only. Record the source and licence of any external data.
