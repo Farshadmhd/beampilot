@@ -49,3 +49,24 @@ def test_too_few_usable_positions_means_measurement_failed(v3) -> None:
     far = v3.LensCase("X", 0.450, 160e-6, 1.0).scenario(0)
     assert v3.usable_positions(far) < 5
     assert v3.oracle_verdict(far) == "measurement_failed"
+
+
+def test_v3_scoring_on_a_scripted_dev_run(v3) -> None:
+    """The v3 runner's scoring, on development seed 62 (no API, not a v3 seed)."""
+    spec = importlib.util.spec_from_file_location(
+        "run_evaluation_v3", REPO / "scripts" / "run_evaluation_v3.py"
+    )
+    runner = importlib.util.module_from_spec(spec)
+    sys.modules["run_evaluation_v3"] = runner
+    spec.loader.exec_module(runner)
+    from beampilot.baselines import scripted_iso
+    from beampilot.session import MeasurementSession
+
+    case = v3.all_cases()[1]  # L2
+    session = MeasurementSession(case.scenario(62))
+    report = scripted_iso(session)["report"]
+    row = runner.score(case, "scripted", session, report, {"cost_usd": 0.0})
+    assert row["expected"] == "iso_compliant" and row["correct"]
+    assert row["within_tolerance"] is True
+    assert row["lens"] == [25.0, -20.0]
+    assert runner.seed_of(case) == 901
