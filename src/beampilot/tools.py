@@ -670,8 +670,14 @@ def _lens_prediction(
             "the fitted waist may be extrapolated)"
         )
     }
+    if any(lens_plan.waist_undetermined(fit) for fit in fits.values()):
+        prediction["label"] = lens_plan.UNDETERMINED_LABEL + (
+            f" (prediction at M² = {lens_plan.NOMINAL_ASSUMED_M2:g})"
+        )
     for axis, fit in fits.items():
-        values, stds = lens_plan.predict(fit, f_m, lens_z_m, _current_lens(session))
+        values, stds = lens_plan.predict(
+            fit, f_m, lens_z_m, _current_lens(session), session.wavelength_m
+        )
         prediction[axis] = _waist_display(values, stds)
     return prediction
 
@@ -983,8 +989,13 @@ def _add_lens_results(
             kit.rail_positions_m(),
             _lens_geometry(session),
             _current_lens(session),
+            session.wavelength_m,
         )
         session.listed_lens_options = [(o.f_m, o.lens_z_m) for o in options]
+        if any(lens_plan.waist_undetermined(fit) for fit in fits.values()):
+            result["lens_options_basis"] = lens_plan.UNDETERMINED_LABEL + (
+                f" (predicted values at M² = {lens_plan.NOMINAL_ASSUMED_M2:g})"
+            )
         result["lens_options"] = [
             {
                 "f_mm": _num(o.f_m * 1e3, 3),

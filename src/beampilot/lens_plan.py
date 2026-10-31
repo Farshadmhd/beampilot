@@ -10,10 +10,17 @@ coefficients of d(z)² = a + b z + c z² (the fit is parametrised by d0, z0 and
 theta; a, b, c and their covariance follow by first-order propagation). A draw
 with c <= 0 or 4ac - b² <= 0 has no real waist and counts as infeasible. The
 random generator has a fixed seed, so the result is deterministic.
+
+A far-field-only fit can leave the waist diameter undetermined (it collapses
+towards d0 = 0 while z0 and theta stay well determined). For such an axis the
+planning uses z0 and theta only: b and c are drawn from the linearised
+covariance (theta = sqrt(c), z0 = -b / (2c)), M² is drawn uniformly in [1, 2]
+and d0 = 4 lambda M² / (pi theta). The output is labelled so.
 """
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 import numpy as np
@@ -36,6 +43,13 @@ ISO_POINTS = 5  # needed near (within zR) and far (beyond 2 zR), per axis
 NEAR_WINDOW_ZR = 0.9  # usable near window, as in the evaluation oracle
 FAR_WINDOW_ZR = 2.3  # far points comfortably beyond 2 zR
 POINT_SPACING_ZR = 0.15  # smallest useful spacing of positions
+# A fitted waist diameter counts as not determined if 4ac - b² <= 0, its
+# relative std exceeds this, or the fitted M² is below MIN_FITTED_M2.
+MAX_D0_REL_STD = 0.5
+MIN_FITTED_M2 = 0.9
+ASSUMED_M2_RANGE = (1.0, 2.0)  # for planning when d0 is not determined
+NOMINAL_ASSUMED_M2 = 1.5
+UNDETERMINED_LABEL = "waist diameter not determined; options assume M² between 1 and 2"
 
 
 @dataclass(frozen=True)
@@ -88,6 +102,34 @@ class LensOption:
 def fit_waist(fit: CausticFit) -> Waist:
     """The fitted waist of one axis (m), also when it is extrapolated."""
     return Waist(fit.d0_m, fit.z0_m, fit.z_r_m)
+
+
+def waist_undetermined(fit: CausticFit) -> bool:
+    """True if the fit does not determine the waist diameter (see module doc)."""
+    a, b, c = abc_from_waist(fit.d0_m, fit.z0_m, fit.theta_rad)
+    return bool(
+        not 4.0 * a * c - b**2 > 0
+        or not fit.d0_std_m <= MAX_D0_REL_STD * fit.d0_m
+        or not fit.m2 >= MIN_FITTED_M2
+    )
+
+
+def _far_field_waist(theta, z0, m2, wavelength_m: float):
+    """Waist from the divergence, waist position and an assumed M² (m, arrays ok)."""
+    d0 = 4.0 * wavelength_m * m2 / (math.pi * theta)
+    return d0, z0, d0 / theta
+
+
+def planning_waist(fit: CausticFit, wavelength_m: float | None) -> Waist:
+    """The waist used for planning: fitted, or from theta, z0 and M² = 1.5.
+
+    Without a wavelength the fitted waist is used as it is.
+    """
+    if wavelength_m is None or not waist_undetermined(fit):
+        return fit_waist(fit)
+    return Waist(
+        *_far_field_waist(fit.theta_rad, fit.z0_m, NOMINAL_ASSUMED_M2, wavelength_m)
+    )
 
 
 def _room(length: NDArray, z_r: NDArray) -> NDArray:
@@ -147,8 +189,8 @@ def _undo_lens(d0, z0, z_r, current_lens: tuple[float, float] | None):
         )
 
 
-def _original_waist(fit: CausticFit, current_lens) -> Waist:
-    waist = fit_waist(fit)
+def _original_waist(fit: CausticFit, current_lens, wavelength_m: float) -> Waist:
+    waist = planning_waist(fit, wavelength_m)
     if current_lens is None:
         return waist
     return back_through_thin_lens(waist, *current_lens)
@@ -172,8 +214,16 @@ def _feasible(geometry: Geometry, waists, f_m: float, lens_z_m: float):
     return ok, np.minimum(near, far) - ISO_POINTS
 
 
-def fit_draws(fit: CausticFit, rng: np.random.Generator, n: int = DRAWS):
+def fit_draws(
+    fit: CausticFit,
+    rng: np.random.Generator,
+    n: int = DRAWS,
+    wavelength_m: float | None = None,
+):
     """Waists drawn from the fit covariance via a, b, c (arrays, m).
+
+    If the waist diameter is not determined (and `wavelength_m` is given),
+    only b and c are drawn, M² is drawn in [1, 2] and d0 follows from theta.
 
     Returns
     -------
@@ -183,6 +233,17 @@ def fit_draws(fit: CausticFit, rng: np.random.Generator, n: int = DRAWS):
     """
     p = np.array([fit.d0_m, fit.z0_m, fit.theta_rad])
     mean, cov = propagate(lambda x: abc_from_waist(*x), p, fit.cov)
+    if wavelength_m is not None and waist_undetermined(fit):
+        b, c = rng.multivariate_normal(
+            mean[1:], cov[1:, 1:], size=n, method="svd", check_valid="ignore"
+        ).T
+        m2 = rng.uniform(*ASSUMED_M2_RANGE, size=n)
+        valid = c > 0
+        with np.errstate(invalid="ignore", divide="ignore"):
+            theta = np.where(valid, np.sqrt(c), np.nan)
+            z0 = np.where(valid, -b / (2.0 * c), np.nan)
+            d0, z0, z_r = _far_field_waist(theta, z0, m2, wavelength_m)
+        return d0, z0, z_r, valid
     a, b, c = rng.multivariate_normal(
         mean, cov, size=n, method="svd", check_valid="ignore"
     ).T
@@ -201,6 +262,7 @@ def lens_options(
     rail_m: list[float],
     geometry: Geometry,
     current_lens: tuple[float, float] | None = None,
+    wavelength_m: float | None = None,
 ) -> list[LensOption]:
     """Feasible lens options from the fits of both axes, best first.
 
@@ -223,6 +285,9 @@ def lens_options(
         Stage, sensor and lens limits.
     current_lens : tuple of float, optional
         (f, position) in m of the lens in the beam now, or None.
+    wavelength_m : float, optional
+        Wavelength in m; needed to plan an axis whose waist diameter is not
+        determined (see :func:`waist_undetermined`).
 
     Returns
     -------
@@ -231,11 +296,11 @@ def lens_options(
     rng = np.random.default_rng(SEED)
     draws = {}
     for axis, fit in fits.items():
-        d0, z0, z_r, valid = fit_draws(fit, rng)
+        d0, z0, z_r, valid = fit_draws(fit, rng, wavelength_m=wavelength_m)
         draws[axis] = (*_undo_lens(d0, z0, z_r, current_lens), valid)
     nominal = {}
     for axis, fit in fits.items():
-        waist = _original_waist(fit, current_lens)
+        waist = _original_waist(fit, current_lens, wavelength_m)
         nominal[axis] = tuple(
             np.array([v]) for v in (waist.d0_m, waist.z0_m, waist.z_r_m)
         ) + (np.array([True]),)
@@ -253,7 +318,9 @@ def lens_options(
                 for axis in fits
             )
             predicted = {
-                axis: through_thin_lens(_original_waist(fit, current_lens), f, z_lens)
+                axis: through_thin_lens(
+                    _original_waist(fit, current_lens, wavelength_m), f, z_lens
+                )
                 for axis, fit in fits.items()
             }
             options.append(LensOption(f, z_lens, fraction, margin, predicted))
@@ -274,15 +341,24 @@ def predict(
     f_m: float,
     lens_z_m: float,
     current_lens: tuple[float, float] | None = None,
+    wavelength_m: float | None = None,
 ):
     """Predicted artificial waist (d0', z0', zR' in m) and its std from the fit.
 
     With a lens in the beam (`current_lens`, (f, position) in m), the fit is
-    first mapped back through it: the new lens replaces it.
+    first mapped back through it: the new lens replaces it. If the waist
+    diameter is not determined (and `wavelength_m` is given), the waist comes
+    from theta, z0 and M² = 1.5.
     """
+    far_field = wavelength_m is not None and waist_undetermined(fit)
 
     def forward(p: NDArray) -> list[float]:
-        waist = Waist(p[0], p[1], p[0] / p[2])
+        if far_field:
+            waist = Waist(
+                *_far_field_waist(p[2], p[1], NOMINAL_ASSUMED_M2, wavelength_m)
+            )
+        else:
+            waist = Waist(p[0], p[1], p[0] / p[2])
         if current_lens is not None:
             waist = back_through_thin_lens(waist, *current_lens)
         new = through_thin_lens(waist, f_m, lens_z_m)

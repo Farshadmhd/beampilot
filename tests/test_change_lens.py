@@ -267,7 +267,7 @@ def test_no_truth_leak_everything_follows_the_fit() -> None:
     fits = _fits(session)
     option = evaluation["lens_options"][0]
     f_m, z_m = option["f_mm"] * 1e-3, option["lens_z_mm"] * 1e-3
-    from_fit = predict(fits["x"], f_m, z_m)[0][1] * 1e3
+    from_fit = predict(fits["x"], f_m, z_m, None, session.wavelength_m)[0][1] * 1e3
     from_truth = through_thin_lens(_original_waists(truth)[0], f_m, z_m).z0_m * 1e3
     assert option["predicted"]["x"]["z0_mm"] == pytest.approx(from_fit, abs=1e-3)
     assert abs(from_fit - from_truth) > 1.0
@@ -445,3 +445,88 @@ def test_change_lens_prediction_uses_the_current_lens() -> None:
     # The camera now sees the original beam through the second lens only.
     true_z0 = session.beam.z0x_m * 1e3
     assert result["prediction"]["x"]["z0_mm"] == pytest.approx(true_z0, abs=5.0)
+
+
+# Review E2: a collapsed far-field-only fit is planned from theta and z0.
+
+NORMAL_FIT_OPTIONS = [
+    (25.0, -20.0, 0.985, 5),
+    (-200.0, -140.0, 0.615, 2),
+    (-200.0, -150.0, 0.055, -3),
+    (40.0, -20.0, 0.005, 1),
+]
+
+
+def _collapsed_far_field_fit():
+    """Far-field-only data of a known beam whose fit collapses (d0 -> 0)."""
+    import math
+
+    import numpy as np
+
+    from beampilot.caustic import fit_caustic
+    from beampilot.lens import Waist
+
+    lam, d0, m2 = 1064e-9, 250e-6, 1.4
+    true = Waist(d0, -0.100, math.pi * d0**2 / (4 * m2 * lam))
+    z = np.linspace(0.0, 0.25, 11)
+    rng = np.random.default_rng(0)
+    d = np.array([true.diameter_at(zi) for zi in z]) * (
+        1 + 0.01 * rng.standard_normal(11)
+    )
+    return fit_caustic(z, d, wavelength_m=lam), true, lam
+
+
+def test_collapsed_fit_still_gives_options_that_work_for_the_true_beam() -> None:
+    import numpy as np
+
+    from beampilot import lens_plan
+
+    fit, true, lam = _collapsed_far_field_fit()
+    assert fit.d0_m < 1e-9 and lens_plan.waist_undetermined(fit)
+    geometry = lens_plan.Geometry(0.0, 0.25, 0.5 * 512 * 5.5e-6, 20 * 5.5e-6, 8e-3)
+    kit = LensKit()
+    fits = {"x": fit, "y": fit}
+    args = (kit.focal_lengths_m, kit.rail_positions_m(), geometry)
+    # Without the wavelength (the old way) every draw collapses: no option.
+    assert lens_plan.lens_options(fits, *args) == []
+    options = lens_plan.lens_options(fits, *args, None, lam)
+    assert options
+    true_draw = tuple(np.array([v]) for v in (true.d0_m, true.z0_m, true.z_r_m))
+    works = [
+        o
+        for o in options
+        if lens_plan._feasible(
+            geometry, (*true_draw, np.array([True])), o.f_m, o.lens_z_m
+        )[0][0]
+    ]
+    assert works, "at least one listed lens must work for the true beam"
+    # The prediction uses theta, z0 and M² = 1.5, not the collapsed d0.
+    values, _ = lens_plan.predict(fit, options[0].f_m, options[0].lens_z_m, None, lam)
+    assert values[0] > 50e-6
+
+
+def test_normal_fit_options_are_unchanged_and_unlabelled() -> None:
+    session = _scanned(_lens_session())
+    evaluation = evaluate(session, "test")
+    got = [
+        (o["f_mm"], o["lens_z_mm"], o["feasible_fraction"], o["margin_points"])
+        for o in evaluation["lens_options"]
+    ]
+    assert got == NORMAL_FIT_OPTIONS
+    assert "lens_options_basis" not in evaluation
+    result = change_lens(session, 25.0, -20.0, "test")
+    assert "label" not in result["prediction"]
+
+
+def test_undetermined_label_appears_in_evaluate_and_change_lens() -> None:
+    from unittest import mock
+
+    from beampilot import lens_plan
+
+    session = _scanned(_lens_session())
+    with mock.patch.object(lens_plan, "waist_undetermined", return_value=True):
+        evaluation = evaluate(session, "test")
+        assert evaluation["lens_options_basis"].startswith(lens_plan.UNDETERMINED_LABEL)
+        option = evaluation["lens_options"][0]
+        result = change_lens(session, option["f_mm"], option["lens_z_mm"], "test")
+    assert result["prediction"]["label"].startswith(lens_plan.UNDETERMINED_LABEL)
