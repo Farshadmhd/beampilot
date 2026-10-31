@@ -56,6 +56,13 @@ Open http://localhost:7860.
   and makes no API calls.
 - **Live runs** need a Meta Model API key: copy `.env.example` to `.env` and set
   `MODEL_API_KEY` there. `.env` is git-ignored.
+- Both show the caustic plot, the latest camera frame, a live ISO coverage counter
+  per axis (5 near and 5 far) and the decision log. After a run they show a results
+  card (verdict, M² ± σ per axis, positions, cost); **Reveal truth** then shows the
+  measured values against the hidden true ones, with the error.
+- **Public hosting:** set `BEAMPILOT_TOKEN_CAP` (tokens per server process; the
+  default, 60,000,000, is about $20 at the token mix of our runs). When the cap is
+  reached, live runs stop and the page says so; replay keeps working.
 
 Without the demo, the scripted baseline runs a scenario with no API key at all:
 
@@ -82,7 +89,7 @@ differences are noise. Full tables: [docs/evaluation-summary.md](docs/evaluation
 
 ## How it's tested
 
-- **280 pytest tests**, including physics known-answer tests:
+- **284 pytest tests**, including physics known-answer tests:
   - an analytic Gaussian gives the right second moments, and a noiseless simulated
     caustic gives back the true M² (including M² = 1);
   - an M² fit on 2 % noise is unbiased;
@@ -114,17 +121,6 @@ Built from 26 October to 4 November 2026 for the Meta Global AI Developer Hackat
 All code was written during the hackathon; there is no prior work, and the commit
 history shows the progress. Developed with Claude Code as a coding assistant under
 the author's direction and review.
-
-## Run the demo locally (Windows, PowerShell)
-```
-.venv\Scripts\python.exe -m pip install -e ".[demo]"
-.venv\Scripts\python.exe -m beampilot.app
-```
-Then open http://localhost:7860. Live runs need `MODEL_API_KEY` in a local `.env`
-(see `.env.example`); replay mode works without a key and makes no API calls.
-For public hosting, set `BEAMPILOT_TOKEN_CAP` (tokens per server process; default
-60,000,000, about $20 at the token mix of our runs). When the cap is reached, live
-runs stop and the page says so.
 
 ## Licence
 
