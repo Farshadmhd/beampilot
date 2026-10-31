@@ -260,6 +260,8 @@ class MeasurementSession:
         self.beam = scenario.beam
         self.segment = 0
         self.lens_changes: list[dict[str, Any]] = []
+        # (f_m, lens_z_m) listed by the last evaluate as lens options.
+        self.listed_lens_options: list[tuple[float, float]] = []
         # PNG data URLs from view_frame, handed to the agent loop by id and
         # never written to logs or run files.
         self.images: dict[str, str] = {}

@@ -159,3 +159,143 @@ def test_lens_kit_rejects_bad_settings() -> None:
     with pytest.raises(ValueError):
         LensKit(rail_min_m=-0.5, source_z_m=-0.4)
     assert len(LensKit().rail_positions_m()) == 29
+
+
+# Phase 2b: lens options, prediction, back-calculation and report fields.
+
+FAR_SCAN = ((0, 8), (5, 9), (10, 10), (40, 15), (80, 25), (120, 35), (160, 45))
+
+
+def _scanned(session: MeasurementSession) -> MeasurementSession:
+    """Far-field scan of a waist before the stage (all points accepted)."""
+    for z, exposure in FAR_SCAN:
+        result = measure_at(session, z, exposure, "test")
+        set_status(session, result["measurement_id"], "accept", "test")
+    return session
+
+
+def _fits(session):
+    from beampilot.tools import _accepted_now, _segment_fits
+
+    accepted = _accepted_now(session)
+    return _segment_fits(
+        accepted, sorted({m.z_m for m in accepted}), session.wavelength_m
+    )
+
+
+def test_lens_options_are_listed_scored_and_deterministic() -> None:
+    session = _scanned(_lens_session())
+    first = evaluate(session, "test")
+    assert first["x"]["waist_accessibility"] == "outside"
+    options = first["lens_options"]
+    assert 1 <= len(options) <= 5
+    fractions = [o["feasible_fraction"] for o in options]
+    assert fractions == sorted(fractions, reverse=True)
+    assert all(0 < f <= 1 for f in fractions)
+    assert "not measured" in first["lens_options_note"]
+    again = _scanned(_lens_session())
+    assert evaluate(again, "test")["lens_options"] == options
+
+
+def test_change_lens_prediction_and_listed_flag() -> None:
+    from beampilot.lens_plan import predict
+
+    session = _scanned(_lens_session())
+    best = evaluate(session, "test")["lens_options"][0]
+    fits = _fits(session)
+    result = change_lens(session, best["f_mm"], best["lens_z_mm"], "test")
+    assert result["listed_option"] is True
+    assert "prediction from the fit" in result["prediction"]["basis"]
+    values, stds = predict(fits["x"], best["f_mm"] * 1e-3, best["lens_z_mm"] * 1e-3)
+    assert result["prediction"]["x"]["z0_mm"] == pytest.approx(
+        values[1] * 1e3, abs=1e-3
+    )
+    assert result["prediction"]["x"]["z0_std_mm"] > 0
+
+    other = _scanned(_lens_session())
+    evaluate(other, "test")
+    unlisted = change_lens(other, 300.0, -300.0, "test")
+    assert unlisted["listed_option"] is False
+    assert "not among the lens_options" in unlisted["listed_option_note"]
+
+
+def test_prediction_without_a_fit_says_why() -> None:
+    session = _lens_session()
+    result = change_lens(session, 25.0, -20.0, "test")
+    assert result["prediction"]["basis"] is None
+    assert "accepted positions" in result["prediction"]["reason"]
+
+
+def test_report_fields_with_a_lens_kit_and_without() -> None:
+    from beampilot.tools import finish
+
+    plain = MeasurementSession(clean_scenario())
+    report = finish(plain, "measurement_failed", "test")["report"]
+    assert not {"method", "lens", "simplifications"} & set(report)
+
+    direct = _lens_session()
+    report = finish(direct, "measurement_failed", "test")["report"]
+    assert report["method"] == "direct" and report["lens"] is None
+
+    session = _scanned(_lens_session())
+    change_lens(session, 25.0, -20.0, "test")
+    _measure_and_accept(session, [0.0, 5.0, 10.0, 15.0, 25.0, 40.0], 1.0)
+    evaluation = evaluate(session, "test")
+    back = evaluation["original_beam_back_calculated"]
+    assert "calculated, not measured" in back["basis"]
+    for key in ("d0_std_um", "dz0_mm_per_plus_1pct_f", "dd0_um_per_plus_1pct_f"):
+        assert back["x"][key] is not None
+    report = finish(session, "estimate_not_compliant", "test")["report"]
+    assert report["method"] == "artificial_waist"
+    assert report["lens"]["f_mm"] == 25.0 and report["lens"]["segment"] == 1
+    assert report["artificial_waist"]["x"]["z0_mm"] == evaluation["x"]["z0_mm"]
+    assert report["m2"]["y"]["m2"] == evaluation["y"]["m2"]
+    assert "artificial waist (thin-lens model)" in report["wording"]
+    assert any("1 % focal-length" in s for s in report["simplifications"])
+
+
+def test_no_truth_leak_everything_follows_the_fit() -> None:
+    """A fit shifted from the truth must give predictions that follow the fit."""
+    from beampilot.lens_plan import back_calculate, predict
+
+    session = _lens_session()
+    truth = session.scenario.beam
+    # The camera sees a beam 15 mm further downstream than the hidden truth.
+    session.beam = replace(truth, z0x_m=truth.z0x_m + 0.015, z0y_m=truth.z0y_m + 0.015)
+    _scanned(session)
+    evaluation = evaluate(session, "test")
+    fits = _fits(session)
+    option = evaluation["lens_options"][0]
+    f_m, z_m = option["f_mm"] * 1e-3, option["lens_z_mm"] * 1e-3
+    from_fit = predict(fits["x"], f_m, z_m)[0][1] * 1e3
+    from_truth = through_thin_lens(_original_waists(truth)[0], f_m, z_m).z0_m * 1e3
+    assert option["predicted"]["x"]["z0_mm"] == pytest.approx(from_fit, abs=1e-3)
+    assert abs(from_fit - from_truth) > 1.0
+    result = change_lens(session, option["f_mm"], option["lens_z_mm"], "test")
+    assert result["prediction"]["x"]["z0_mm"] == pytest.approx(from_fit, abs=1e-3)
+
+    # After the lens, shift the camera's beam again; the back-calculation must
+    # follow that fit, not the hidden original beam.
+    session.beam = replace(session.beam, z0x_m=session.beam.z0x_m + 0.004)
+    _measure_and_accept(session, [0.0, 5.0, 10.0, 15.0, 25.0, 40.0], 1.0)
+    back = evaluate(session, "test")["original_beam_back_calculated"]
+    expected = back_calculate(_fits(session)["x"], f_m, z_m)[0][1] * 1e3
+    assert back["x"]["z0_mm"] == pytest.approx(expected, abs=1e-3)
+    assert abs(back["x"]["z0_mm"] - truth.z0x_m * 1e3) > 1.0
+
+
+def test_draws_without_a_real_waist_count_as_infeasible() -> None:
+    import numpy as np
+
+    from beampilot.caustic import CausticFit
+    from beampilot.lens_plan import fit_draws
+
+    # A very uncertain fit: many draws have c <= 0 or 4ac - b² <= 0.
+    cov = ((1e-8, 0.0, 0.0), (0.0, 1e-2, 0.0), (0.0, 0.0, 4e-6))
+    fit = CausticFit(
+        2e-4, 1e-4, -0.05, 0.1, 2e-3, 2e-3, 0.1, 0.1, 1.2, 1.0, 0.0, 7, True, cov
+    )
+    d0, z0, z_r, valid = fit_draws(fit, np.random.default_rng(0))
+    assert 0 < valid.sum() < valid.size
+    assert np.all(np.isnan(d0[~valid])) and np.all(np.isnan(z0[~valid]))
+    assert np.all(d0[valid] > 0) and np.all(z_r[valid] > 0)
