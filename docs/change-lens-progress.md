@@ -30,18 +30,7 @@ Tests: see the latest commit (`.venv\Scripts\python.exe -m pytest`).
 
 ## Next
 
-- **STOP 3** (now): the maintainer reviews the v3 results and phase 5. Do not merge
-  `add-change-lens` into main before the OK.
-- **Phase 3**:
-  - `AgentConfig(change_lens=False)`; the tool is offered only with the switch on
-    and a lens kit; schema and prompt section (≤ 1,650 words with lenses);
-  - byte-identical test with the switch off;
-  - one live smoke run: `waist_outside_range`, seed 920, cost cap $0.30.
-- **Phase 4**:
-  - calibration (scripted, seeds 950–957, the 8 v3 beams);
-  - `docs/evaluation-plan-v3.md`, committed and pushed before any run on seeds
-    900–907 (STOP 2).
-- **Phase 5**: UI and replay, README section, CLAUDE.md note (STOP 3).
+Phases 1–5 are done. Next: the maintainer's merge of `add-change-lens` into main.
 
 ## Margin of the v3 cases (31 Oct 2026)
 
@@ -65,46 +54,39 @@ Computed by `scripts/v3_cases.py` (`margin_report`), from the true beam:
 
 ## Open issues
 
-1. **Waist after the stage, scripted, 24 positions.** With the waist at 280 mm
-   (development seeds 41–43, after fix 1), the scripted operator chooses +750 mm
-   at −20 mm, and the back-calculation is accurate (d0 within 0.6 %, z0 within
-   0.006 zR, M² within 1.1 %).
-   - It still uses all 24 positions and ends 4 of 5 far points short per axis
-     (`estimate_not_compliant`).
-   - Positions: 11 measurements before the lens (4 of them retries after
-     saturation or low signal), 1 for the lens, 12 after it.
-   - Decided: the v3 budget is 28 positions for every contender (`6fda336`).
-2. (Resolved in fix 2.) Lens options are listed only for `outside`.
-3. (Resolved in `bc6def7`.) **Collapsed far-field-only fit (review E2).** Inside
-   lens planning only, an undetermined waist diameter is planned from θ and z0
-   with M² drawn in [1, 2], and labelled. `fit_caustic` is unchanged.
-4. (Resolved in `4389598`.) **Truth probing via the 8 mm refusal (review R1).** A
-   refusal because the beam really clips at the lens now costs one position;
-   kit, rail, change-limit and finished-run refusals stay free.
-5. (Resolved in `6fda336`.) **L8 replaced.** The old L8 (waist at 450 mm) has no
-   usable stage position; the oracle now expects `measurement_failed` for fewer
-   than 5 usable positions. The new L8 (waist −20 mm, d0 230 µm, M² 1.0) was
-   chosen by a recorded search in `scripts/v3_cases.py`: 67 candidates with
-   ≥ 10 usable positions and no feasible lens; the one with the most usable
-   positions (44). It is a borderline case: the waist is about 0.5 zR before the
-   stage.
+1. **Waist after the stage needed more positions.** With 24 positions the scripted
+   operator ran out at 280 mm (development seeds 41–43), although its lens choice
+   and back-calculation were accurate. Resolved: the v3 budget is 28 positions for
+   every contender (`6fda336`); L5–L7 then succeeded in the dry run, the
+   calibration and v3.
+2. (Resolved, `2b4b829`.) Lens options are listed only for `outside`.
+3. (Resolved, `bc6def7`.) **Collapsed far-field-only fit (review E2).** Inside lens
+   planning only, an undetermined waist diameter is planned from θ and z0, with M²
+   drawn in [1, 2], and labelled. `fit_caustic` is unchanged.
+4. (Resolved, `4389598`.) **Truth probing via the 8 mm refusal (review R1).** A
+   refusal because the beam really clips at the lens costs one position; kit,
+   rail, change-limit and finished-run refusals stay free.
+5. (Resolved, `6fda336` and `4336058`.) **L8.**
+   - The first L8 (waist at 450 mm) had no usable stage position. The oracle now
+     expects `measurement_failed` for fewer than 5 usable positions.
+   - The second choice (waist −20 mm, d0 230 µm) had no margin.
+   - The current L8 is the waist at **+260 mm, d0 130 µm, M² 1.0**. It was chosen
+     by the recorded search in `scripts/v3_cases.py`: at least 10 usable stage
+     positions, and no feasible kit × rail lens for the true beam or for any of
+     the 27 corners (z0 ±10 mm, d0 ±10 %, M² ±10 %).
+   - The rule picks the most usable positions: 25 of 87 candidates, with d0 from
+     100 µm. Its waist lies 10 mm past the stage end (about 0.8 zR).
 6. (Resolved.) README sentence on the focal-length tolerance (review R3).
 7. (Resolved.) Design doc: sorting by the larger spare margin, linearised a, b, c
    draws, and the collapsed-fit planning rule.
-9. **New failure in the dry run with 28 positions (L8, dev seed 74).**
-   - Only one lens option was listed, +40 mm at −20 mm, with a feasible fraction
-     of 0.155. Its predicted artificial waist sits exactly at the stage start
-     (z0' = −0.05 mm; true −0.5 mm). The scripted rule takes the first option
-     whatever its fraction.
-   - After the lens, the scout rule (z0', ±1 zR', ±2.5 zR', clipped) gives only 3
-     distinct positions (0, 18.9, 47.3 mm), because the clipped ones coincide at
-     0 mm. The fit needs 4.
-   - The scripted procedure then stops at `not_enough_data` and finishes
-     `measurement_failed` with 14 of 28 positions used. Expected:
-     `waist_not_accessible`.
-   - The code comment "at least 4 positions remain" in `baselines.py` is
-     therefore wrong at the stage edge.
-   - Stopped here for a maintainer decision; no phase 3 yet.
-8. For waists after the stage, the focal-length sensitivity is about 1.2 mm in z0
-   per +1 % f (+750 mm lens), half of 0.1 zR. It is not simulated (the simulator
-   uses the exact f), so the v3 tolerances do not include it.
+8. (Resolved, `bf54e93` and `4336058`.) **Dry-run failure on the second L8 (dev
+   seed 74).** A barely-listed lens put the predicted waist at the stage start, and
+   the clipped post-lens scouts collapsed to 3 positions. Fixed in general: after
+   a lens there are always at least 4 distinct scouts, stepping into the stage from
+   a clipped end. L8 was re-selected with the margin. The rerun reached the
+   expected verdict in 16 of 16 runs.
+9. **Focal-length sensitivity (open, documented).** For waists after the stage it
+   reaches 1.2–3.4 mm in z0 per +1 % f; for the agent's L7 lens, 3.4 mm equals the
+   0.1 zR tolerance. It is not simulated (the simulator uses the exact f), so the
+   v3 tolerances do not include it. This is stated in the README and the v3
+   results.

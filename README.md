@@ -121,13 +121,18 @@ If a real lens is 1 % longer than its nominal focal length, the reported z0 is o
 by minus the listed 'per +1 % f' value.
 
 **Evaluation v3** (pre-registered, 8 waist-outside beams, one run each, $0.97):
-- **Agent:** 8 of 8 verdicts right, including one honest `waist_not_accessible`
-  where no kit lens could help. In all 7 lens cases M², the back-calculated d0 and
-  z0 were within tolerance (3 %, 5 % and 0.1 zR; mostly well under 1 %).
-- **Scripted operator:** with a fixed lens rule it did the same; the naive scan got
-  1 of 8.
-- **Caveats:** the cases were not held out, and two of them are close to the edge
-  of what the kit can do. Details:
+- **Agent and scripted operator tie:** 8 of 8 verdicts right each, and 7 of 7 lens
+  cases within tolerance each (M² 3 %, back-calculated d0 5 % and z0 0.1 zR; mostly
+  well under 1 %). Both include one honest `waist_not_accessible` where no kit lens
+  could help. The naive scan, which never uses a lens, got 1 of 8.
+- **The agent took the first Python-ranked lens option in every case.** So v3
+  shows that the feature works end to end. It does **not** show that the model
+  chooses lenses better than a fixed rule.
+- **L7:** with the agent's lens (+750 mm at −130 mm), a focal length 1 % longer
+  moves z0 by 3.4 mm, which equals the 0.1 zR tolerance. The simulator uses the
+  exact f, so this does not show in the result.
+- **Caveats:** the cases were not held out, and two of them (L1, L4) are close to
+  the edge of what the kit can do. Details:
   [docs/evaluation-results-v3.md](docs/evaluation-results-v3.md).
 
 ## How it's tested
