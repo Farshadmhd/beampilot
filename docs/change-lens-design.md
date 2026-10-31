@@ -1,11 +1,26 @@
 # change_lens: design (artificial waist for an inaccessible waist)
 
-Status: design only, 31 Oct 2026, branch `add-change-lens`. No code yet. This is the
-stretch tool from [agent-design.md](agent-design.md) (section 4). Implementing it
-changes the agent, the prompt and the tools, which are frozen since 27 Oct 2026. So
-coding starts only after the maintainer approves this design and lifts the freeze
-for this feature. Everything new sits behind a switch that is **off by default**, so
-v1 and v2 stay reproducible.
+Status: approved 31 Oct 2026 with the corrections below folded in; branch
+`add-change-lens`. This is the stretch tool from [agent-design.md](agent-design.md)
+(section 4). The freeze on agent, prompt and tools is lifted for this feature only.
+
+**Switch.** `AgentConfig(change_lens=False)` by default, and no existing scenario has
+a lens kit. The tool is offered to the agent only when **both** the config switch is
+on **and** the session has a lens kit. With the switch off, the tool list, the tool
+schemas and the system prompt are **byte-identical** to before this feature (a test
+checks this), so v1 and v2 stay reproducible.
+
+**No truth leak.** The simulator renders measurements after a lens change from the
+**true** beam through the lens, because that is what a camera would see. Everything
+the agent is told is computed from the **fit** only:
+- the prediction returned by `change_lens`;
+- `lens_options` in `evaluate`;
+- the back-calculated original beam.
+
+The one truth-based check is the 8 mm aperture refusal. It is a yes/no answer
+without numbers, as an operator would see the beam overfill the lens. A test uses a
+session whose fit is deliberately shifted from the truth, and checks that the
+prediction follows the fit, not the truth.
 
 ## Goal
 
@@ -64,6 +79,10 @@ caustic fit's covariance (first order, numerical Jacobian of the function above)
 They are statistical only: the lens focal length and position are assumed exact
 (see the simplifications).
 
+**Focal-length sensitivity.** For the back-calculated original beam, `evaluate` and
+`finish` also report "dz0 per +1 % f" (mm) and "dd0 per +1 % f" (µm). Both come from
+a numerical derivative: the back-calculation repeated with f × 1.01.
+
 **Units.** SI (m) in Python. At the tool boundary, as for every other tool:
 f and positions in mm, diameters in µm, wavelength in nm.
 
@@ -72,7 +91,9 @@ f and positions in mm, diameters in µm, wavelength in nm.
 2. Paraxial optics.
 3. No aberrations (spherical, chromatic or astigmatic).
 4. The lens is perfectly centred and not tilted, and its focal length and
-   position are exact (no tolerance).
+   position are exact. Real lenses have about ±1 % focal-length tolerance, which
+   can dominate the error in z0 for short focal lengths; the simulator uses the
+   exact f. The reported sensitivity per +1 % f shows the size of that effect.
 5. The lens aperture does not clip the beam. The tool refuses a placement where
    the beam diameter at the lens exceeds 8 mm (a 25.4 mm lens: more than 3 beam
    radii of margin).
@@ -135,8 +156,11 @@ change_lens(f_mm, lens_z_mm, reason)
 - **`f_mm`** must be one of the kit values. **`lens_z_mm`** must be a rail
   position.
 - **Cost:** 1 position from the budget (mounting and realignment). **At most 2
-  lens changes per run**; a second change replaces the first lens. There is no
-  "remove" call.
+  lens changes per run.** A second change **replaces** the first lens: segment 2
+  is the original beam through the new lens only, and the back-calculation uses
+  only the current lens. There is no "remove" call.
+- A combination that `evaluate` did not list in `lens_options` is still accepted
+  if kit and rail allow it, and the output says so (`"listed_option": false`).
 - **Refused** (error result, nothing changes) for: a value outside the kit or the
   rail, a third change, the beam at the lens over 8 mm, or a finished run.
 - **Effect:** a new **beam segment** starts (section 4). Darks stay valid (the
@@ -151,30 +175,40 @@ change_lens(f_mm, lens_z_mm, reason)
   - a reminder that measurements of the old segment no longer enter any fit.
 
 **Choosing a lens without guessing.** When `evaluate` reports an axis as `outside`
-(or `uncertain`) and the scenario has a lens kit, its result gains a
-`lens_options` list. Python computes every kit × rail combination from the current
-fit and keeps the feasible ones: predicted z0' inside the stage, d0' ≥ 110 µm on
-both axes, room for 5 near and 5 far points, and no clipping at the lens. They are
-sorted by a fixed robustness score: feasible across z0 ± 2σ of the current fit,
-then by the smallest margin. The agent picks from these numbers; it never computes
-optics itself.
+(or `uncertain`) and the lens tool is offered, its result gains a `lens_options`
+list.
+- **Source.** The options come from the **internal fit** of each axis: the
+  coefficients a, b, c of d² = a + b z + c z² and their covariance. The reported
+  d0, z0 and zR are null when the waist is outside, so they cannot be used.
+- **Draws.** Python draws **200 samples** from that covariance per axis, with a
+  **fixed RNG seed** so the scripted operator stays deterministic. A draw with
+  c ≤ 0 or 4ac − b² ≤ 0 counts as infeasible.
+- **Feasibility.** For each kit × rail combination, Python computes the fraction of
+  draws in which it is feasible on both axes: predicted z0' inside the stage,
+  d0' ≥ 110 µm, room for 5 near and 5 far points, and the beam at the lens
+  ≤ 8 mm by the fit.
+- **Ranking.** Options are sorted by that fraction, then by the smallest margin
+  (the least spare room of near/far points over both axes, for the nominal fit).
+  **At most 5** are listed, each with its fraction and the nominal predicted d0',
+  z0' and zR' per axis.
+
+The agent picks from these numbers; it never computes optics itself.
 
 `get_setup` shows `lens_kit_mm`, `lens_rail_mm` (min, max, step), `source_z_mm`
 and `lens_changes_left`, and only when the scenario enables lenses. The system
 prompt gets a short "Inaccessible waist: change_lens" section, also only when
 enabled (like the `view_frame` section).
 
-**Open decision: prompt length.** The base prompt is at 1,495 of 1,500 words, and
-the lens section needs about 120 more. Two options:
-- (a) allow up to 1,650 words when lenses are enabled (the base test keeps 1,500);
-- (b) shorten elsewhere.
+**Prompt length (decided).** Up to 1,650 words, only when lenses are enabled. The
+base prompt test stays at 1,500 words.
 
 ## 4. Session: before and after the lens are different beams
 
 - `MeasurementSession.segment` starts at 0. Each `change_lens` increments it and
-  stores the lens (f, z_L) and the **transformed hidden beam**: per axis d0', z0',
-  same M². The simulator stays unchanged, because the session simply renders with
-  the transformed `BeamParams`.
+  stores the lens (f, z_L) and the **transformed hidden beam**: the true original
+  beam through the current lens only, per axis d0', z0', same M². The simulator
+  stays unchanged, because the session simply renders with the transformed
+  `BeamParams`. The agent never sees these true values.
 - Every `Measurement` records its `segment`. Ids keep counting (m1, m2, …), so the
   log stays readable.
 - **`evaluate` fits only the accepted measurements of the current segment.** The
@@ -193,13 +227,15 @@ the lens section needs about 120 more. Two options:
 - the usual fit: d0, z0, zR and M², with σ;
 - `lens_options` when the waist is outside (section 3);
 - after a lens change, also `original_beam_back_calculated`: d0, z0 and zR with σ,
-  computed by Python as in section 1 and marked `"calculated, not measured"`.
+  computed by Python from the fit as in section 1 and marked
+  `"calculated, not measured"`. It includes "dz0 per +1 % f" and "dd0 per +1 % f".
 
 **`finish`** writes the report from session state as today, plus:
 - `method`: `"direct"` or `"artificial_waist"`;
 - `lens`: f_mm, lens_z_mm, segment, and before which measurement it was inserted;
 - `artificial_waist`: per axis, the measured d0', z0' and zR', with σ;
-- `original_beam_back_calculated`: per axis, d0, z0 and zR, with σ;
+- `original_beam_back_calculated`: per axis, d0, z0 and zR, with σ, and the
+  focal-length sensitivity;
 - `m2`: per axis, from the artificial-waist fit (the ISO quantity);
 - the list of simplifications from section 1.
 
@@ -259,18 +295,26 @@ The naive scan never uses a lens (reference only).
    - `set_status` on old ids is refused;
    - points from the old segment never appear in the fit, even if they were
      accepted.
-7. **End to end:** a waist-outside scenario (for example z0 = −60 mm) plus the
-   chosen kit lens and the simulated measurements gives:
-   - the back-calculated original d0 within 3 % and z0 within 2 mm;
-   - M² within 3 % of the truth.
+7. **End to end:** a waist-outside scenario plus the chosen kit lens and the
+   simulated measurements meets the shared tolerances:
+   - M² within 3 % on both axes;
+   - the back-calculated original d0 within 5 %;
+   - z0 within 0.1 × the true original zR.
 
    This runs with the scripted baseline, so there are no API calls.
 8. **Tool contract:**
    - kit and rail are enforced, as are the change limit and the 8 mm clipping
      refusal;
    - the prediction is labelled as such;
-   - nothing changes when the switch is off: the v1 and v2 tool list and prompt
-     are unchanged.
+   - an unlisted combination is accepted and flagged;
+   - a second change uses the original beam through the new lens only;
+   - with the switch off, the tool list, schemas and system prompt are
+     byte-identical to before.
+9. **No truth leak:** a session whose fit is deliberately shifted from the truth
+   returns a `change_lens` prediction, `lens_options` and a back-calculated beam
+   that follow the fit, not the truth.
+10. **Replay:** a run file with `change_lens` calls replays, and an old run file
+    without segment fields still replays.
 
 ## 8. Mini-evaluation v3 (to be pre-registered before any run)
 
@@ -297,21 +341,28 @@ The final expected verdicts come from an **oracle with lenses**, applied to the
 true beam and committed in the v3 plan: `iso_compliant` if any kit × rail option
 passes the v1 coverage rule, otherwise `waist_not_accessible`.
 
+**Calibration first.** Before the v3 plan is written, the scripted operator runs
+the 8 beam definitions with **calibration seeds 950–957** (not the v3 seeds), and
+the plan records the spread of its errors. **Nothing runs on seeds 900–907 before
+the plan is committed and pushed.**
+
 **Metrics:**
 - correct verdict;
-- for `iso_compliant` cases, a "measurement within tolerance" flag: |M² error| ≤ 3 %
-  on both axes, back-calculated d0 within 5 % and z0 within 3 mm;
+- for `iso_compliant` cases, a "measurement within tolerance" flag, with the same
+  tolerances as the end-to-end test:
+  - |M² error| ≤ 3 % on both axes;
+  - back-calculated d0 within 5 %;
+  - z0 within 0.1 × the true original zR;
 - lens choices, positions, model calls and cost.
 
 **Contenders, in this order:**
 1. `agent` (lens on, `view_frame` on);
 2. `scripted` (lens rule);
-3. `naive` (reference);
-4. if the budget allows, `agent-nolens` as a control (the v2 configuration).
+3. `naive` (reference).
 
 **Cost:** an estimated $0.10–0.15 per agent run (lens runs need more calls), about
-$1 for agent and $2 with the control. **Hard stop at $2 in total**: cases not run
-by then are reported as not run. One run per case; small N, stated as such.
+$1 in total. **Hard stop at $2**: cases not run by then are reported as not run. One
+run per case; small N, stated as such.
 
 ## 9. Work estimate and what to cut
 
@@ -323,7 +374,7 @@ by then are reported as not run. One run per case; small N, stated as such.
 | Agent switch, schema, prompt section, tests | 1.5 |
 | Scripted lens rule and end-to-end test | 2 |
 | v3 plan, oracle with lenses, script support, run, results | 2.5 |
-| Replay and UI: show segments | 1 |
+| UI: "Lens kit" checkbox (default off), a log line per lens change, caustic plot of the current segment only; replay of `change_lens` and of old run files without segments | 1 |
 | Physics review, docs | 1.5 |
 | **Total** | **≈ 16 h** |
 
@@ -333,11 +384,10 @@ first.
 
 **Cut in this order if behind:**
 1. UI segment display (the log line is enough);
-2. the `agent-nolens` control runs in v3;
-3. the second lens change (allow one only);
-4. σ propagation for the back-calculated values (report them without σ, labelled);
-5. the scripted lens rule (v3 becomes agent-only, stated openly);
-6. v3 itself (ship the feature with its tests only, no evaluation claims).
+2. the second lens change (allow one only);
+3. σ propagation for the back-calculated values (report them without σ, labelled);
+4. the scripted lens rule (v3 becomes agent-only, stated openly);
+5. v3 itself (ship the feature with its tests only, no evaluation claims).
 
 ## 10. ISO 11146-1 points to verify before calling this "compliant"
 
