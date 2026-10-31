@@ -962,12 +962,14 @@ def _waist_display(values, stds) -> dict[str, float | None]:
 def _add_lens_results(
     session: MeasurementSession, result: dict[str, Any], fits: dict[str, CausticFit]
 ) -> None:
-    """Lens options and the back-calculated beam, from the fits only."""
+    """Lens options and the back-calculated beam, from the fits only.
+
+    Lens options only when an axis is ``outside``; for ``uncertain`` the
+    evaluation's advice stays to measure closer to that stage end first.
+    """
     kit = session.scenario.lens_kit
     fitted = all(fit.success and fit.cov is not None for fit in fits.values())
-    waist_out = any(
-        result[axis]["waist_accessibility"] in ("outside", "uncertain") for axis in fits
-    )
+    waist_out = any(result[axis]["waist_accessibility"] == "outside" for axis in fits)
     if fitted and waist_out:
         options = lens_plan.lens_options(
             fits, kit.focal_lengths_m, kit.rail_positions_m(), _lens_geometry(session)

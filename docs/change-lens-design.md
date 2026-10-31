@@ -175,8 +175,9 @@ change_lens(f_mm, lens_z_mm, reason)
   - a reminder that measurements of the old segment no longer enter any fit.
 
 **Choosing a lens without guessing.** When `evaluate` reports an axis as `outside`
-(or `uncertain`) and the lens tool is offered, its result gains a `lens_options`
-list.
+and the lens tool is offered, its result gains a `lens_options` list. For
+`uncertain` there are no options: `evaluate` keeps its advice to measure closer to
+that stage end first (decided 31 Oct 2026).
 - **Source.** The options come from the **internal fit** of each axis: the
   coefficients a, b, c of d² = a + b z + c z² and their covariance. The reported
   d0, z0 and zR are null when the waist is outside, so they cannot be used.

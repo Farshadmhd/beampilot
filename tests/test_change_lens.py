@@ -354,3 +354,17 @@ def test_scripted_scouts_come_from_the_prediction_clipped_to_the_stage() -> None
     }
     assert operator.scouts_from_prediction(middle) == [120.0, 110.0, 130.0, 95.0, 145.0]
     assert operator.scouts_from_prediction({"basis": None}) is None
+
+
+def test_lens_options_only_for_outside_not_for_uncertain() -> None:
+    from beampilot.tools import _add_lens_results
+
+    session = _scanned(_lens_session())
+    fits = _fits(session)
+    for accessibility, listed in (("uncertain", False), ("outside", True)):
+        result = {
+            axis: {"waist_accessibility": accessibility, "m2": None}
+            for axis in ("x", "y")
+        }
+        _add_lens_results(session, result, fits)
+        assert ("lens_options" in result) is listed
