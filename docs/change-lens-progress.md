@@ -22,14 +22,16 @@ Branch `add-change-lens` (not merged). Design: [change-lens-design.md](change-le
 | Docs | `545044c` | Design sections 6 and 8 and the margin table updated. |
 | Dry run | – | Seeds 60–75, 28 positions: 16/16 runs reach the oracle's verdict; worst errors d0 0.6 %, z0 0.012 zR, M² 1.0 %. |
 | Phase 3 | `396e2e3` | `AgentConfig(change_lens=False)`; byte-identical tools and prompt with the switch off (hash test); `prompts/change_lens.md` (1,631 words with lenses); `run_agent.py --lens --max-positions`. Live smoke run (seed 920, $0.133): `iso_compliant`, +25 mm @ −20 mm, d0 +0.2 %, z0 +0.002 zR, M² +0.3 %. |
-| Phase 4 | `2a7dfd5` + plan | Calibration on 950–957 (8/8 expected verdicts); `scripts/run_evaluation_v3.py`; `docs/evaluation-plan-v3.md`. **STOP 2: no run on 900–907 before the maintainer's OK.** |
+| Phase 4 | `2a7dfd5` + plan | Calibration on 950–957 (8/8 expected verdicts); `scripts/run_evaluation_v3.py`; `docs/evaluation-plan-v3.md`. |
+| v3 | `58e1b29`, `f74badf`, `3f7b01a` | Deviation 1 (80 calls, 3 M tokens, $3 stop), then the v3 runs: agent 8/8 correct and 7/7 within tolerance ($0.97), scripted 8/8 and 7/7, naive 1/8. `docs/evaluation-results-v3.md`. |
+| Phase 5 | `ac055de` + docs | "Lens kit" checkbox (off by default, 28 positions, 80 calls), log line per lens change, caustic of the current segment only; replay of lens runs and of old run files (tested). README section, CLAUDE.md note. |
 
 Tests: see the latest commit (`.venv\Scripts\python.exe -m pytest`).
 
 ## Next
 
-- **STOP 2** (now): the maintainer reviews `docs/evaluation-plan-v3.md`; after the OK, run
-  `scripts/run_evaluation_v3.py --run` and write `docs/evaluation-results-v3.md`.
+- **STOP 3** (now): the maintainer reviews the v3 results and phase 5. Do not merge
+  `add-change-lens` into main before the OK.
 - **Phase 3**:
   - `AgentConfig(change_lens=False)`; the tool is offered only with the switch on
     and a lens kit; schema and prompt section (≤ 1,650 words with lenses);
