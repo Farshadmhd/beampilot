@@ -57,6 +57,9 @@ EXTEND_ROUNDS = 3  # measurements towards a waist outside the measured span
 # Warning that makes the scripted operator reject a measurement anyway: beam
 # light in the corner patches biases the background offset.
 CAUTIOUS_REJECT_FLAGS = ("beam_in_corners",)
+# After a lens change: scout at the predicted waist and at these offsets in its
+# predicted zR' (clipped to the stage; at least 4 positions remain for a fit).
+LENS_SCOUT_ZR = (0.0, -1.0, 1.0, -2.5, 2.5)
 
 
 def suggest_verdict(evaluation: dict[str, Any]) -> str:
@@ -160,8 +163,10 @@ def scripted_iso(session: MeasurementSession) -> dict[str, Any]:
        ``waist_not_accessible`` and ``evaluate`` lists lens options, insert
        the first one (``evaluate`` sorts them by a fixed rule: feasible
        fraction, then spare points, then the larger |f|, then the lens
-       closer to the stage), then repeat steps 1-5 on the new beam with the
-       first exposure scaled from the predicted waist. At most one lens.
+       closer to the stage). On the new beam, scout at the predicted waist z0'
+       and at +-1 and +-2.5 zR' (the prediction ``change_lens`` returns, the same the
+       agent gets; clipped to the stage), with the first exposure scaled from
+       the predicted waist, then repeat steps 3-5. At most one lens.
 
     Parameters
     ----------
@@ -186,11 +191,12 @@ def scripted_iso(session: MeasurementSession) -> dict[str, Any]:
             "Scripted: insert the first lens option from evaluate (fixed rule).",
         )
         if "segment" in result:
-            hint = operator.exposure_for_waist(result["prediction"])
+            prediction = result["prediction"]
+            hint = operator.exposure_for_waist(prediction)
             operator = _ScriptedOperator(session)
             if hint is not None:
                 operator.exposure_hint = hint
-            evaluation = operator.run()
+            evaluation = operator.run(operator.scouts_from_prediction(prediction))
             verdict = suggest_verdict(evaluation)
     return _finish(session, verdict, f"Scripted: rules on evaluate gave {verdict}.")
 
@@ -213,10 +219,18 @@ class _ScriptedOperator:
         self.remeasured: set[float] = set()  # failed positions tried once more
         self.tried: set[tuple[float, float]] = set()  # (z_mm, exposure_ms) measured
 
-    def run(self) -> dict[str, Any]:
-        """Scout, extend towards the waist, place ISO positions; last evaluate."""
+    def run(self, scouts_mm: list[float] | None = None) -> dict[str, Any]:
+        """Scout, extend towards the waist, place ISO positions; last evaluate.
+
+        With `scouts_mm` (after a lens change) those positions replace the
+        spread-out scout: they come from the predicted new waist.
+        """
         session = self.session
-        self.scout()
+        if scouts_mm is None:
+            self.scout()
+        else:
+            for z_mm in scouts_mm:
+                self.measure(z_mm, "Scripted: scout at the predicted new waist.")
         evaluation = evaluate(session, "Scripted: first fit from the scout positions.")
         # A waist inside the stage but outside the measured span is reported as
         # not determined: measure towards it until the waist lies inside the span.
@@ -236,6 +250,25 @@ class _ScriptedOperator:
                 self.measure(z_mm, "Scripted: ISO position planned from the fit.")
             evaluation = evaluate(session, "Scripted: refit with the new positions.")
         return evaluation
+
+    def scouts_from_prediction(self, prediction: dict[str, Any]) -> list[float] | None:
+        """Scout positions from the predicted new waist, the same numbers the agent
+        gets: at z0', +-1 zR' and +-2.5 zR' (mean of both axes), clipped to the
+        stage.
+
+        None (normal spread-out scout) if there is no prediction.
+        """
+        if prediction.get("basis") is None:
+            return None
+        z0 = 0.5 * (prediction["x"]["z0_mm"] + prediction["y"]["z0_mm"])
+        z_r = 0.5 * (prediction["x"]["z_r_mm"] + prediction["y"]["z_r_mm"])
+        z_min, z_max = self.setup["stage_range_mm"]
+        scouts: list[float] = []
+        for offset in LENS_SCOUT_ZR:
+            z = round(float(np.clip(z0 + offset * z_r, z_min, z_max)), 1)
+            if all(abs(z - s) >= 1.0 for s in scouts):
+                scouts.append(z)
+        return scouts
 
     def exposure_for_waist(self, prediction: dict[str, Any]) -> float | None:
         """Exposure in ms for the predicted new waist, from a good measurement.

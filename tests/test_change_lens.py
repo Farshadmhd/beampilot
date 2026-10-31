@@ -334,3 +334,23 @@ def test_scripted_operator_without_a_kit_is_unchanged() -> None:
     report = scripted_iso(session)["report"]
     assert report["verdict"] == "waist_not_accessible"
     assert "method" not in report and session.lens_changes == []
+
+
+def test_scripted_scouts_come_from_the_prediction_clipped_to_the_stage() -> None:
+    from beampilot.baselines import _ScriptedOperator
+
+    operator = _ScriptedOperator(_lens_session())
+    near_start = {
+        "basis": "prediction",
+        "x": {"z0_mm": 10.0, "z_r_mm": 24.0},
+        "y": {"z0_mm": 12.0, "z_r_mm": 26.0},
+    }
+    # z0' 11, zR' 25: 11, -14 -> 0, 36, -51.5 -> 0 (duplicate), 73.5
+    assert operator.scouts_from_prediction(near_start) == [11.0, 0.0, 36.0, 73.5]
+    middle = {
+        "basis": "prediction",
+        "x": {"z0_mm": 120.0, "z_r_mm": 10.0},
+        "y": {"z0_mm": 120.0, "z_r_mm": 10.0},
+    }
+    assert operator.scouts_from_prediction(middle) == [120.0, 110.0, 130.0, 95.0, 145.0]
+    assert operator.scouts_from_prediction({"basis": None}) is None
