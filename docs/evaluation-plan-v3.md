@@ -132,4 +132,13 @@ positions; not a v3 case):
 
 ## Deviations
 
-None yet.
+1. **31 Oct 2026, before any v3 run: higher agent limits and budget.**
+   - **Reason:** the smoke run used 41 of 60 model calls for 21 positions, and
+     L5–L7 need 23–26 positions, so the 60-call limit would probably decide some
+     runs (as A8 and C2 in v1).
+   - **For v3 only:** the agent limits are **80 model calls** and **3 M tokens**;
+     the per-run cost cap stays at **$0.50**.
+   - **The total hard stop rises from $2 to $3.**
+   - **Change:** only the settings in `scripts/run_evaluation_v3.py`
+     (`AGENT_CONFIG`, `BUDGET_USD`); no other code changed. The commit is recorded
+     below once it exists.

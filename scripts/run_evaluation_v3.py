@@ -36,7 +36,15 @@ from beampilot.session import (  # noqa: E402
 OUT_DIR = Path("runs") / "evaluation-v3"
 RESULTS = OUT_DIR / "results.jsonl"
 FIRST_SEED = 900
-BUDGET_USD = 2.0
+BUDGET_USD = 3.0  # plan v3, deviation 1 (was 2.0)
+# Agent limits for v3 (plan deviation 1): more model calls and tokens; the
+# per-run cost cap stays at $0.50.
+AGENT_CONFIG = {
+    "change_lens": True,
+    "max_model_calls": 80,
+    "max_total_tokens": 3_000_000,
+    "max_cost_usd": 0.50,
+}
 CONTENDERS = ("agent", "scripted", "naive")
 # Measurement within tolerance (iso_compliant cases): design section 7, item 7.
 M2_TOL = 0.03
@@ -129,7 +137,7 @@ def run_all() -> int:
             continue
         session = MeasurementSession(case.scenario(seed_of(case)))
         try:
-            run = run_agent(session, client, AgentConfig(change_lens=True))
+            run = run_agent(session, client, AgentConfig(**AGENT_CONFIG))
         except Exception:  # noqa: BLE001 - record and stop: no silent re-runs
             record(
                 {
