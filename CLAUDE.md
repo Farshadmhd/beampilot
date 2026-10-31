@@ -1,8 +1,8 @@
 # CLAUDE.md — project rules for BeamPilot
 
 BeamPilot is an agentic laser beam characterisation tool (ISO 11146 second-moment
-beam widths, caustic fit, M²). It uses the Meta Model API: Muse Spark as the
-agent and SAM 3.1 for beam segmentation.
+beam widths, caustic fit, M²). It uses the Meta Model API with Muse Spark as the
+agent.
 
 ## Agent design
 - `docs/agent-design.md` is the source of truth for the agent, tools, units and
