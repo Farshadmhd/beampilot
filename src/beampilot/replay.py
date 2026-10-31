@@ -24,6 +24,7 @@ class MeasurementPoint:
     d_x_um: float | None
     d_y_um: float | None
     status: str = "pending"
+    segment: int = 0  # beam segment (lens changes); 0 in old run files
 
 
 @dataclass
@@ -40,6 +41,7 @@ class RunState:
     model_calls: int = 0
     total_tokens: int = 0
     cost_usd: float = 0.0
+    segment: int = 0  # current beam segment; a lens change starts a new one
     # Index of the log line that collects consecutive set_status calls.
     _status_line: int | None = field(default=None, repr=False)
 
@@ -75,12 +77,18 @@ class RunState:
                 exposure_ms=result["exposure_ms"],
                 d_x_um=result["d_x_um"]["mean"],
                 d_y_um=result["d_y_um"]["mean"],
+                segment=result.get("segment", 0),
             )
             self.points[point.measurement_id] = point
             self.last_measurement = point
             self.positions_left = result.get("positions_left")
         elif name == "retake_darks":
             self.positions_left = result.get("positions_left")
+        elif name == "change_lens":
+            # A new beam: the old fit and points no longer describe it.
+            self.segment = result.get("segment", self.segment + 1)
+            self.positions_left = result.get("positions_left")
+            self.evaluation = None
         elif name == "set_status":
             point = self.points.get(result.get("measurement_id"))
             if point is not None:
@@ -101,7 +109,11 @@ class RunState:
         evaluation = self.evaluation
         if not evaluation:
             return None
-        accepted = {p.z_mm for p in self.points.values() if p.status == "accept"}
+        accepted = {
+            p.z_mm
+            for p in self.points.values()
+            if p.status == "accept" and p.segment == self.segment
+        }
         counts = {}
         for axis in ("x", "y"):
             fit = evaluation.get(axis) or {}
@@ -215,6 +227,19 @@ def _log_line(name: str, arguments: dict, reason: str, result: dict) -> str:
             f"{line}\n  → {result['measurement_id']}: d_x {d_x} µm, d_y {d_y} µm, "
             f"flags {', '.join(flags) or 'none'}, "
             f"suggested {result.get('suggested_verdict')}"
+        )
+    if name == "change_lens":
+        prediction = result.get("prediction") or {}
+        guess = prediction.get("x") or {}
+        predicted = (
+            f", predicted waist {guess['z0_mm']} mm (from the fit)"
+            if guess.get("z0_mm") is not None
+            else ""
+        )
+        return (
+            f"🔎 **change_lens**(f={arguments.get('f_mm')} mm, "
+            f"z={arguments.get('lens_z_mm')} mm) — {reason}\n  → new beam segment "
+            f"{result.get('segment')}{predicted}; earlier points no longer count"
         )
     if name == "evaluate" and result.get("status") == "ok":
         parts = []

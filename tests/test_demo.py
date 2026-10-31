@@ -423,3 +423,78 @@ def test_token_cap_is_configurable_and_shown_when_reached(monkeypatch) -> None:
     assert "Live runs are paused" in demo_app.budget_text(RunState())
     update = next(demo_app.live_run("clean", 0, "", SimpleNamespace(session_hash="c")))
     assert "used up its token budget" in update[2]
+
+
+# Lens kit (change_lens): live runs, replay and old run files.
+
+
+def _lens_script_client() -> FakeClient:
+    script = [
+        ("get_setup", {}),
+        ("measure_at", {"z_mm": 60.0, "exposure_ms": 8.0}),
+        ("change_lens", {"f_mm": 25.0, "lens_z_mm": -20.0}),
+        ("measure_at", {"z_mm": 10.0, "exposure_ms": 1.0}),
+        ("finish", {"verdict": "measurement_failed", "explanation": "test run"}),
+    ]
+    return FakeClient([_response(_call(name, **args)) for name, args in script])
+
+
+def test_lens_kit_checkbox_offers_change_lens_in_live_runs(
+    monkeypatch, tmp_path
+) -> None:
+    client = _lens_script_client()
+    monkeypatch.setattr(demo_app, "_client", lambda: client)
+    monkeypatch.setattr(demo_app, "LIVE_RUNS_DIR", tmp_path)
+    request = SimpleNamespace(session_hash="test-lens")
+    demo_app._BROWSERS.pop("test-lens", None)
+    updates = list(
+        demo_app.live_run("waist_outside_range", 0, "", request, lens_kit=True)
+    )
+    assert "change_lens" in {t["name"] for t in client.requests[0]["tools"]}
+    log = updates[-1][3]
+    assert "**change_lens**(f=25.0 mm, z=-20.0 mm)" in log
+    assert "new beam segment 1" in log
+    session = demo_app._browser(request).session
+    assert session.scenario.max_positions == demo_app.LENS_POSITIONS
+
+
+def test_lens_kit_is_off_by_default_in_live_runs(monkeypatch, tmp_path) -> None:
+    client = _lens_script_client()
+    monkeypatch.setattr(demo_app, "_client", lambda: client)
+    monkeypatch.setattr(demo_app, "LIVE_RUNS_DIR", tmp_path)
+    request = SimpleNamespace(session_hash="test-nolens")
+    demo_app._BROWSERS.pop("test-nolens", None)
+    list(demo_app.live_run("waist_outside_range", 0, "", request))
+    assert "change_lens" not in {t["name"] for t in client.requests[0]["tools"]}
+
+
+def test_replay_of_a_lens_run_shows_only_the_current_segment(tmp_path) -> None:
+    from dataclasses import replace
+
+    from beampilot.agent import AgentConfig
+    from beampilot.session import LensKit, waist_outside_range_scenario
+
+    scenario = replace(waist_outside_range_scenario(), lens_kit=LensKit())
+    session = MeasurementSession(scenario)
+    run = run_agent(session, _lens_script_client(), AgentConfig(change_lens=True))
+    path = tmp_path / "lens.json"
+    save_run(run, path, {"scenario": "lens", "seed": 0, **session_record(session)})
+    state = _play(load_run(path))
+    assert state.segment == 1
+    assert {p.segment for p in state.points.values()} == {0, 1}
+    assert any("**change_lens**" in line for line in state.log)
+    fig = caustic_figure(state, (0.0, 250.0))
+    plotted = [
+        x for coll in fig.axes[0].collections for x, _ in coll.get_offsets().tolist()
+    ]
+    assert plotted and all(abs(z - 10.0) < 1e-9 for z in plotted)
+
+
+def test_old_run_files_without_segments_still_replay() -> None:
+    for path in demo_app.demo_runs():
+        data = json.loads(path.read_text(encoding="utf-8"))
+        assert "segment" not in json.dumps(data["steps"])  # written before lenses
+        state = _play(load_run(path))
+        assert state.segment == 0 and state.points
+        assert all(p.segment == 0 for p in state.points.values())
+        assert isinstance(caustic_figure(state, (0.0, 250.0)), Figure)
