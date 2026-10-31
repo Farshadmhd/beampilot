@@ -299,3 +299,38 @@ def test_draws_without_a_real_waist_count_as_infeasible() -> None:
     assert 0 < valid.sum() < valid.size
     assert np.all(np.isnan(d0[~valid])) and np.all(np.isnan(z0[~valid]))
     assert np.all(d0[valid] > 0) and np.all(z_r[valid] > 0)
+
+
+# Phase 2c: scripted lens rule, end to end (no API calls).
+
+
+def test_scripted_operator_recovers_the_original_beam_through_a_lens() -> None:
+    """Design section 7, item 7: shared tolerances for the end-to-end case."""
+    from beampilot.baselines import scripted_iso
+    from beampilot.session import reveal_truth
+
+    scenario = replace(
+        waist_outside_range_scenario(seed=31), lens_kit=LensKit(), max_positions=24
+    )
+    session = MeasurementSession(scenario)
+    report = scripted_iso(session)["report"]
+    truth = reveal_truth(session)
+    assert report["verdict"] == "iso_compliant"
+    assert report["method"] == "artificial_waist"
+    assert len(session.lens_changes) == 1
+    back = report["original_beam_back_calculated"]
+    for axis in ("x", "y"):
+        m2 = report["m2"][axis]["m2"]
+        assert m2 == pytest.approx(truth[f"m2_{axis}"], rel=0.03)
+        assert back[axis]["d0_um"] == pytest.approx(truth[f"d0_{axis}_um"], rel=0.05)
+        z_r = truth[f"z_r_{axis}_mm"]
+        assert abs(back[axis]["z0_mm"] - truth[f"z0_{axis}_mm"]) <= 0.1 * z_r
+
+
+def test_scripted_operator_without_a_kit_is_unchanged() -> None:
+    from beampilot.baselines import scripted_iso
+
+    session = MeasurementSession(waist_outside_range_scenario(seed=31))
+    report = scripted_iso(session)["report"]
+    assert report["verdict"] == "waist_not_accessible"
+    assert "method" not in report and session.lens_changes == []

@@ -1,8 +1,8 @@
 """Two scripted baselines that use only the public agent tools.
 
 Both strategies call exactly the tools the agent gets (``get_setup``,
-``measure_at``, ``retake_darks``, ``set_status``, ``evaluate``, ``finish``)
-and see only their JSON results, so the comparison with the agent is fair
+``measure_at``, ``retake_darks``, ``set_status``, ``evaluate``, ``finish``, and
+``change_lens`` in setups with a lens kit) and see only their JSON results, so the comparison with the agent is fair
 (design section 8). Units follow the tool boundary: z in mm, diameters in um.
 
 - :func:`naive_uniform`: an evenly spaced scan with one fixed exposure.
@@ -20,6 +20,7 @@ import numpy as np
 from beampilot.session import MeasurementSession
 from beampilot.tools import (
     STAGE_END_FRACTION,
+    change_lens,
     evaluate,
     finish,
     get_setup,
@@ -154,6 +155,12 @@ def scripted_iso(session: MeasurementSession) -> dict[str, Any]:
        accept the rest. No exposure retries at a position where the beam is
        too large for the sensor.
     5. Evaluate again and finish with :func:`suggest_verdict`.
+    6. Lens rule (only in setups with a lens kit): if step 5 gives
+       ``waist_not_accessible`` and ``evaluate`` lists lens options, insert
+       the first one (``evaluate`` sorts them by a fixed rule: feasible
+       fraction, then spare points, then the larger |f|, then the lens
+       closer to the stage), then repeat steps 1-5 on the new beam with the
+       first exposure scaled from the predicted waist. At most one lens.
 
     Parameters
     ----------
@@ -166,26 +173,24 @@ def scripted_iso(session: MeasurementSession) -> dict[str, Any]:
         The ``finish`` result.
     """
     operator = _ScriptedOperator(session)
-    operator.scout()
-    evaluation = evaluate(session, "Scripted: first fit from the scout positions.")
-    # A waist inside the stage but outside the measured span is reported as
-    # not determined: measure towards it until the waist lies inside the span.
-    for _ in range(EXTEND_ROUNDS):
-        if not operator.extend_towards_waist(evaluation):
-            break
-        evaluation = evaluate(
-            session, "Scripted: refit after measuring nearer the waist."
-        )
-    for _ in range(PLACEMENT_ROUNDS):
-        if evaluation.get("status") != "ok" or evaluation["iso_coverage_met"]:
-            break
-        planned = operator.plan_positions(evaluation)
-        if not planned:
-            break
-        for z_mm in planned:
-            operator.measure(z_mm, "Scripted: ISO position planned from the fit.")
-        evaluation = evaluate(session, "Scripted: refit with the new positions.")
+    evaluation = operator.run()
     verdict = suggest_verdict(evaluation)
+    options = evaluation.get("lens_options") if evaluation.get("status") == "ok" else []
+    if verdict == "waist_not_accessible" and options:
+        option = options[0]
+        result = change_lens(
+            session,
+            option["f_mm"],
+            option["lens_z_mm"],
+            "Scripted: insert the first lens option from evaluate (fixed rule).",
+        )
+        if "segment" in result:
+            hint = operator.exposure_for_waist(result["prediction"])
+            operator = _ScriptedOperator(session)
+            if hint is not None:
+                operator.exposure_hint = hint
+            evaluation = operator.run()
+            verdict = suggest_verdict(evaluation)
     return _finish(session, verdict, f"Scripted: rules on evaluate gave {verdict}.")
 
 
@@ -206,6 +211,54 @@ class _ScriptedOperator:
         self.exposure_hint = START_EXPOSURE_MS
         self.remeasured: set[float] = set()  # failed positions tried once more
         self.tried: set[tuple[float, float]] = set()  # (z_mm, exposure_ms) measured
+
+    def run(self) -> dict[str, Any]:
+        """Scout, extend towards the waist, place ISO positions; last evaluate."""
+        session = self.session
+        self.scout()
+        evaluation = evaluate(session, "Scripted: first fit from the scout positions.")
+        # A waist inside the stage but outside the measured span is reported as
+        # not determined: measure towards it until the waist lies inside the span.
+        for _ in range(EXTEND_ROUNDS):
+            if not self.extend_towards_waist(evaluation):
+                break
+            evaluation = evaluate(
+                session, "Scripted: refit after measuring nearer the waist."
+            )
+        for _ in range(PLACEMENT_ROUNDS):
+            if evaluation.get("status") != "ok" or evaluation["iso_coverage_met"]:
+                break
+            planned = self.plan_positions(evaluation)
+            if not planned:
+                break
+            for z_mm in planned:
+                self.measure(z_mm, "Scripted: ISO position planned from the fit.")
+            evaluation = evaluate(session, "Scripted: refit with the new positions.")
+        return evaluation
+
+    def exposure_for_waist(self, prediction: dict[str, Any]) -> float | None:
+        """Exposure in ms for the predicted new waist, from a good measurement.
+
+        The peak scales with 1 / (d_x d_y) at fixed power, so the exposure that
+        gave a good peak is scaled by the area ratio and to the target peak.
+        """
+        if not self.good or prediction.get("basis") is None:
+            return None
+        last = self.good[-1]
+        area_now = last["d_x_um"]["mean"] * last["d_y_um"]["mean"]
+        area_new = prediction["x"]["d0_um"] * prediction["y"]["d0_um"]
+        peak = last["details"]["peak_counts"]
+        if not (area_now > 0 and area_new > 0 and peak and peak > 0):
+            return None
+        exposure = (
+            last["exposure_ms"]
+            * area_new
+            / area_now
+            * TARGET_PEAK_FRACTION
+            * self.full_scale
+            / peak
+        )
+        return float(np.clip(exposure, *self.exposure_range))
 
     def scout(self) -> None:
         """Measure 4 scout positions; refill towards the smallest beam.
