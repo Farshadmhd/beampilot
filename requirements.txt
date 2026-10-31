@@ -1,0 +1,8 @@
+# Runtime dependencies of the hosted demo (Hugging Face Space), pinned to the
+# versions tested locally. Gradio is pinned by sdk_version in space/README.md.
+numpy==2.5.4
+scipy==1.18.1
+scikit-image==0.26.0
+matplotlib==3.11.2
+openai==3.38.0
+python-dotenv==1.2.4
