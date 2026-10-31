@@ -91,7 +91,24 @@ def test_change_lens_limits_changes_positions_and_aperture() -> None:
     narrow = _lens_session(max_beam_at_lens_m=0.1e-3)  # beam always wider
     result = change_lens(narrow, 40.0, -20.0, "test")
     assert "overfills the lens" in result["error"]
-    assert narrow.segment == 0
+    assert "cost one position (39 left)" in result["error"]
+    assert narrow.segment == 0 and narrow.positions_used == 1
+
+
+def test_only_a_real_clip_refusal_costs_a_position() -> None:
+    session = _lens_session(max_changes=1)
+    for f_mm, z_mm in ((50.0, -20.0), (40.0, -25.0), (40.0, -500.0)):
+        assert "error" in change_lens(session, f_mm, z_mm, "test")
+    assert session.positions_used == 0  # kit and rail refusals are free
+    change_lens(session, 25.0, -20.0, "test")
+    used = session.positions_used
+    assert "no lens changes left" in change_lens(session, 40.0, -20.0, "test")["error"]
+    assert session.positions_used == used  # change-limit refusal is free
+    from beampilot.tools import finish
+
+    finish(session, "measurement_failed", "test")
+    assert "finished" in change_lens(session, 40.0, -20.0, "test")["error"]
+    assert session.positions_used == used  # finished run: free
 
 
 def test_change_lens_starts_a_segment_with_the_true_beam_through_the_lens() -> None:

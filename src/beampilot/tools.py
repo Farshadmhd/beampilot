@@ -576,8 +576,9 @@ def change_lens(
     position. A new beam segment starts: earlier measurements no longer enter
     any fit and cannot change status. A later change replaces the lens (the
     original beam through the new lens only). Refused for a focal length
-    outside the kit, a position off the rail, no changes or positions left,
-    or a beam that would overfill the lens at that position.
+    outside the kit, a position off the rail, no changes or positions left
+    (free), or a beam that overfills the lens at that position (costs one
+    position: the lens was mounted before the overfill was seen).
 
     Parameters
     ----------
@@ -619,9 +620,12 @@ def change_lens(
     if session.positions_left <= 0:
         raise ToolInputError("position budget used up; call evaluate and finish")
     if session.lens_would_clip(lens_z_m):
+        # A real attempt: the lens was mounted before the overfill was seen.
+        session.positions_used += 1
         raise ToolInputError(
             f"the beam overfills the lens at {lens_z_m * 1e3:g} mm (wider than "
-            f"{kit.max_beam_at_lens_m * 1e3:g} mm); choose another position or lens"
+            f"{kit.max_beam_at_lens_m * 1e3:g} mm); choose another position or "
+            f"lens. This refusal cost one position ({session.positions_left} left)."
         )
     listed = any(
         abs(f_m - f) <= 1e-9 and abs(lens_z_m - z) <= 1e-9
