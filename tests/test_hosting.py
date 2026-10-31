@@ -14,7 +14,7 @@ from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
 
-import httpx
+import httpx2  # the HTTP library of the openai SDK (not httpx)
 import pytest
 from test_demo import _lens_script_client, _scripted_client
 
@@ -188,17 +188,17 @@ def test_dummy_key_never_reaches_ui_run_file_or_console(
 
     seen = []
 
-    def server(request: httpx.Request) -> httpx.Response:
+    def server(request: httpx2.Request) -> httpx2.Response:
         auth = request.headers.get("authorization", "")
         seen.append(auth)
         message = f"Incorrect API key provided: {auth}"
-        return httpx.Response(401, json={"error": {"message": message}})
+        return httpx2.Response(401, json={"error": {"message": message}})
 
     real = openai.OpenAI
 
     def offline_openai(*args, **kwargs):
-        transport = httpx.MockTransport(server)
-        return real(*args, http_client=httpx.Client(transport=transport), **kwargs)
+        transport = httpx2.MockTransport(server)
+        return real(*args, http_client=httpx2.Client(transport=transport), **kwargs)
 
     monkeypatch.setattr(openai, "OpenAI", offline_openai)
     monkeypatch.setattr(demo_app, "_CLIENT", None)  # build a fresh client
