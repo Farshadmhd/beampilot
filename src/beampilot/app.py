@@ -12,12 +12,19 @@ Replay mode plays saved runs (``docs/runs/*.json`` or an uploaded file) without
 any API call. Only simulated data is ever sent.
 
 Limits: per browser tab (runs, tokens, one run at a time) and process-wide
-(concurrent runs, total runs and tokens since start). Per-tab limits reset when
-the page is reloaded; the process-wide caps are the real guard. For public
-hosting, set the process-wide token cap with the environment variable
-``BEAMPILOT_TOKEN_CAP`` (tokens; default 60,000,000, about $20 at the token mix
-of our agent runs). When it is reached, live runs stop and the page says so;
-replay keeps working.
+(one live run at a time, total runs, tokens and spend since start). Per-tab
+limits reset when the page is reloaded; the process-wide caps are the real
+guard. Environment variables for public hosting (see docs/hosting-plan.md):
+
+- ``BEAMPILOT_LIVE_RUNS``: ``off`` switches live runs off (default ``on``).
+- ``BEAMPILOT_SPEND_CAP_USD``: live-run spend cap per process start, in USD
+  (default 5). A run starts only if the spend so far plus a worst-case run
+  ($0.55) stays within the cap.
+- ``BEAMPILOT_TOKEN_CAP``: token cap per process start (default 60,000,000,
+  about $20 at the token mix of our agent runs).
+
+When live runs are off, have no key or are out of budget, the page says so when
+it loads and the Start button is disabled; replay keeps working.
 """
 
 # No "from __future__ import annotations" here: Gradio inspects the handlers'
@@ -55,20 +62,41 @@ DEMO_RUNS_DIR = REPO_ROOT / "docs" / "runs"
 LIVE_RUNS_DIR = REPO_ROOT / "runs"
 MYSTERY = "Mystery beam"
 
+# Recording dates of the shipped runs (the run files hold no date).
+RECORDED_MANIFEST = DEMO_RUNS_DIR / "recorded.csv"
+
 # Limits per browser tab (reset on page reload: a convenience, not a guard).
 MAX_RUNS_PER_SESSION = 3
-SESSION_TOKEN_BUDGET = 2_000_000
+# One lens run may use its full v3 token limit (LENS_MAX_TOKENS).
+SESSION_TOKEN_BUDGET = 3_000_000
 # Process-wide caps: they hold across reloads, tabs and invented session ids.
-MAX_CONCURRENT_RUNS = 2
+MAX_CONCURRENT_RUNS = 1
 GLOBAL_MAX_RUNS = 50
 # About $20: agent runs cost ~$0.34 per million tokens (input + output) with
 # ~90 % of the input cached; without caching it would be up to ~$75.
 DEFAULT_TOKEN_CAP = 60_000_000
 TOKEN_CAP_ENV = "BEAMPILOT_TOKEN_CAP"
+LIVE_SWITCH_ENV = "BEAMPILOT_LIVE_RUNS"
+SPEND_CAP_ENV = "BEAMPILOT_SPEND_CAP_USD"
+DEFAULT_SPEND_CAP_USD = 5.0
+# Worst case of one run in USD: the per-run cost cap ($0.50) plus the overshoot
+# of the one model call that may still run when the cap is reached.
+RUN_COST_RESERVE_USD = 0.55
 RUN_TIMEOUT_S = 15 * 60
-# "Lens kit" live runs (change_lens): the budget and call limit of evaluation v3.
+# "Lens kit" live runs (change_lens): the limits of evaluation v3.
 LENS_POSITIONS = 28
 LENS_MODEL_CALLS = 80
+LENS_MAX_TOKENS = 3_000_000
+LENS_MAX_COST_USD = 0.50
+# Replays run in parallel; live runs have their own queue of one.
+REPLAY_CONCURRENCY = 4
+
+LIVE_OFF_TEXT = "Live runs are switched off on this demo right now. Replay works."
+NO_KEY_TEXT = (
+    "Live runs are not set up on this demo (no MODEL_API_KEY). "
+    "Replay works without one."
+)
+BUDGET_TEXT = "This demo has used its live-run budget for now; use Replay."
 EVENT_POLL_S = 0.25
 MAX_SEED = 1_000_000
 MAX_UPLOAD = "5mb"
@@ -90,37 +118,101 @@ GLOBAL_TOKEN_BUDGET = token_cap_from_env()
 ISO_POINTS = 5  # per axis: near (within 1 zR) and far (beyond 2 zR)
 
 
-class GlobalBudget:
-    """Process-wide run and token caps, thread-safe."""
+def spend_cap_from_env() -> float:
+    """Spend cap per process start in USD from ``BEAMPILOT_SPEND_CAP_USD``.
 
-    def __init__(self) -> None:
+    Returns
+    -------
+    float
+        The cap in USD; the default (5) if the variable is unset, not a number
+        or not positive.
+    """
+    try:
+        cap = float(os.environ.get(SPEND_CAP_ENV, "").strip())
+    except ValueError:
+        return DEFAULT_SPEND_CAP_USD
+    return cap if cap > 0 and cap != float("inf") else DEFAULT_SPEND_CAP_USD
+
+
+def live_switch_on() -> bool:
+    """False if ``BEAMPILOT_LIVE_RUNS`` switches live runs off (default on)."""
+    value = os.environ.get(LIVE_SWITCH_ENV, "").strip().lower()
+    return value not in {"off", "0", "false", "no"}
+
+
+def api_key_present() -> bool:
+    """Whether ``MODEL_API_KEY`` is set (environment or ``.env``, as the client).
+
+    Only the presence is checked; the value is never returned or shown.
+    """
+    from dotenv import load_dotenv
+
+    load_dotenv(Path.cwd() / ".env")
+    return bool(os.environ.get("MODEL_API_KEY", "").strip())
+
+
+class GlobalBudget:
+    """Process-wide caps on runs, tokens and spend (USD), thread-safe.
+
+    Each started run reserves a worst-case cost (``RUN_COST_RESERVE_USD``)
+    until it ends, so the spend cap holds even for the last run.
+    """
+
+    def __init__(self, spend_cap_usd: float | None = None) -> None:
         self._lock = threading.Lock()
         self.active = 0
         self.runs = 0
         self.tokens = 0
+        self.spent_usd = 0.0
+        self.reserved_usd = 0.0
+        self.spend_cap_usd = (
+            spend_cap_from_env() if spend_cap_usd is None else spend_cap_usd
+        )
+
+    def _out_of_budget(self) -> str | None:
+        # Caller holds the lock.
+        if self.runs >= GLOBAL_MAX_RUNS:
+            return "The demo has used up its live runs; use Replay."
+        if self.tokens >= GLOBAL_TOKEN_BUDGET:
+            return "The demo has used up its token budget; use Replay."
+        worst = self.spent_usd + self.reserved_usd + RUN_COST_RESERVE_USD
+        if worst > self.spend_cap_usd:
+            return BUDGET_TEXT
+        return None
+
+    def out_of_budget(self) -> str | None:
+        """Why no new run could start for budget reasons, else None."""
+        with self._lock:
+            return self._out_of_budget()
 
     def reserve(self) -> str | None:
         """Reserve a run slot; returns why not, or None if reserved."""
         with self._lock:
             if self.active >= MAX_CONCURRENT_RUNS:
-                return "The server is busy with other live runs; try again soon."
-            if self.runs >= GLOBAL_MAX_RUNS:
-                return "The demo has used up its live runs; use Replay."
-            if self.tokens >= GLOBAL_TOKEN_BUDGET:
-                return "The demo has used up its token budget; use Replay."
+                return "The server is busy with another live run; try again soon."
+            refusal = self._out_of_budget()
+            if refusal is not None:
+                return refusal
             self.active += 1
             self.runs += 1
+            self.reserved_usd += RUN_COST_RESERVE_USD
             return None
 
     def release(self, started: bool = True) -> None:
         with self._lock:
             self.active = max(0, self.active - 1)
+            self.reserved_usd = max(0.0, self.reserved_usd - RUN_COST_RESERVE_USD)
             if not started:
                 self.runs = max(0, self.runs - 1)
 
     def add_tokens(self, tokens: int) -> None:
         with self._lock:
             self.tokens += tokens
+
+    def add_cost(self, cost_usd: float) -> None:
+        """Add the estimated cost of one model reply, in USD."""
+        with self._lock:
+            self.spent_usd += cost_usd
 
     def tokens_left(self) -> int:
         with self._lock:
@@ -172,6 +264,58 @@ def _client() -> Any:
 def demo_runs() -> list[Path]:
     """Saved runs shipped for replay mode (``docs/runs/*.json``)."""
     return sorted(DEMO_RUNS_DIR.glob("*.json"))
+
+
+def recorded_dates() -> dict[str, str]:
+    """Recording date (``YYYY-MM-DD``) per shipped run file name, from the manifest."""
+    import csv
+
+    try:
+        with RECORDED_MANIFEST.open(encoding="utf-8", newline="") as handle:
+            return {row["file"]: row["recorded"] for row in csv.DictReader(handle)}
+    except (OSError, KeyError):
+        return {}
+
+
+def recorded_label(path: Path | None, data: Any) -> str:
+    """'Recorded run, <date>, <model>': a replay is never taken for a live run."""
+    date = recorded_dates().get(path.name) if path is not None else None
+    config = data.get("config") if isinstance(data, dict) else None
+    model = config.get("model") if isinstance(config, dict) else None
+    return f"Recorded run, {date or 'date unknown'}, {model or 'model unknown'}"
+
+
+def replay_choices() -> list[tuple[str, str]]:
+    """(label, value) of each shipped run for the replay dropdown."""
+    import json
+
+    choices = []
+    for path in demo_runs():
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            data = None
+        label = f"{recorded_label(path, data)}: {path.stem}"
+        choices.append((label, path.relative_to(REPO_ROOT).as_posix()))
+    return choices
+
+
+def live_unavailable() -> str | None:
+    """Why live runs can't start on this server now, or None if they can.
+
+    Checked in this order: the live switch, the API key, the process budget.
+    """
+    if not live_switch_on():
+        return LIVE_OFF_TEXT
+    if not api_key_present():
+        return NO_KEY_TEXT
+    return _GLOBAL.out_of_budget()
+
+
+def live_banner() -> tuple[str, bool]:
+    """Banner text and whether the Start button is enabled, at page load."""
+    reason = live_unavailable()
+    return (f"⛔ **{reason}**" if reason else ""), reason is None
 
 
 def scenario_choices() -> list[str]:
@@ -439,12 +583,9 @@ def build_app():
             live_reveal = gr.Button("Reveal truth")
             live_truth = gr.Markdown()
 
-        with gr.Tab("Replay"):
+        with gr.Tab("Replay (recorded runs)"):
             with gr.Row():
-                saved = gr.Dropdown(
-                    [p.relative_to(REPO_ROOT).as_posix() for p in demo_runs()],
-                    label="Saved run",
-                )
+                saved = gr.Dropdown(replay_choices(), label="Recorded run")
                 upload = gr.File(label="...or load a run JSON", file_types=[".json"])
                 speed = gr.Slider(
                     0.0, 2.0, value=0.4, step=0.1, label="Seconds per step"
@@ -484,6 +625,10 @@ def build_app():
         def tab_closed(request: gr.Request) -> None:
             _forget_browser(request)
 
+        def page_load():
+            banner, enabled = live_banner()
+            return banner, gr.update(interactive=enabled)
+
         # UI only: none of these endpoints is offered as a public API.
         private = {"api_visibility": "private"}
         start.click(
@@ -498,6 +643,9 @@ def build_app():
                 live_report,
                 live_truth,
             ],
+            # One live run at a time in its own queue; replays are not blocked.
+            concurrency_limit=MAX_CONCURRENT_RUNS,
+            concurrency_id="live",
             **private,
         )
         room_light.click(room_light_on, None, fault_status, **private)
@@ -525,7 +673,7 @@ def build_app():
             replay_truth,
             **private,
         )
-        app.load(cap_text, None, cap_banner, **private)
+        app.load(page_load, None, [cap_banner, start], **private)
         app.unload(tab_closed)
     return app
 
@@ -561,6 +709,9 @@ def live_run(
         seed = -1
     if not 0 <= seed <= MAX_SEED:
         yield _message(f"The seed must be between 0 and {MAX_SEED}.")
+        return
+    if not live_switch_on():
+        yield _message(LIVE_OFF_TEXT)
         return
 
     browser = _browser(request)
@@ -601,7 +752,7 @@ def live_run(
     except Exception as exc:  # noqa: BLE001 - e.g. no API key: free the slots
         _release(browser, started=False)
         text = (
-            "Live runs need MODEL_API_KEY in the environment or .env; use Replay."
+            NO_KEY_TEXT
             if isinstance(exc, RuntimeError)
             else f"Could not start the run ({type(exc).__name__})."
         )
@@ -611,11 +762,17 @@ def live_run(
         browser.session = session
 
     tokens_left = min(SESSION_TOKEN_BUDGET - browser.tokens, _GLOBAL.tokens_left())
-    config = AgentConfig(
-        max_total_tokens=min(AgentConfig().max_total_tokens, tokens_left),
-        change_lens=lens_kit,
-        **({"max_model_calls": LENS_MODEL_CALLS} if lens_kit else {}),
-    )
+    if lens_kit:  # the v3 limits
+        config = AgentConfig(
+            max_model_calls=LENS_MODEL_CALLS,
+            max_total_tokens=min(LENS_MAX_TOKENS, tokens_left),
+            max_cost_usd=LENS_MAX_COST_USD,
+            change_lens=True,
+        )
+    else:
+        config = AgentConfig(
+            max_total_tokens=min(AgentConfig().max_total_tokens, tokens_left)
+        )
     events: queue.Queue = queue.Queue()
     worker = threading.Thread(
         target=_work,
@@ -673,6 +830,7 @@ def _work(browser, session, client, config, note, scenario_name, seed, events):
         with browser.lock:
             browser.tokens += tokens
         _GLOBAL.add_tokens(tokens)
+        _GLOBAL.add_cost(float(step.get("cost_usd") or 0.0))
         events.put(("reply", step))
 
     def should_stop() -> str | None:
@@ -776,13 +934,16 @@ def reveal_live_table(request: Any = None) -> str:
 
 def replay(saved: str | None, upload: Any, seconds_per_step: float):
     """Play a saved run step by step (generator); no API calls."""
-    path = getattr(upload, "name", upload) if upload else None
-    path = path or (REPO_ROOT / saved if saved else None)
+    uploaded = getattr(upload, "name", upload) if upload else None
+    path = uploaded or (REPO_ROOT / saved if saved else None)
     if not path:
-        yield _replay_message("Choose a saved run or upload one.")
+        yield _replay_message("Choose a recorded run or upload one.")
         return
     try:
-        yield from _replay(load_run(path), seconds_per_step)
+        run = load_run(path)
+        # An uploaded file is never matched to the manifest of shipped runs.
+        label = recorded_label(None if uploaded else Path(path), run.data)
+        yield from _replay(run, seconds_per_step, label)
     except Exception as exc:  # noqa: BLE001 - an uploaded file may contain anything
         yield _replay_message(f"Cannot replay this file ({type(exc).__name__}).")
 
@@ -791,13 +952,13 @@ def _replay_message(text: str) -> tuple:
     return (text, None, None, "", "", "", None, "", None)
 
 
-def _replay(run: SavedRun, seconds_per_step: float):
+def _replay(run: SavedRun, seconds_per_step: float, label: str):
     state = RunState()
     stage = (0.0, 250.0)
     params = run.data.get("scenario_params")
     if params:
         stage = (float(params["stage_min_m"]) * 1e3, float(params["stage_max_m"]) * 1e3)
-    title = f"**Replay:** {run.title}"
+    title = f"📼 **{label}** (a replay, not a live run): {run.title}"
     note = run.data.get("operator_note")
     if note:
         title += f"\n\n**Operator note:** {note}"
@@ -851,7 +1012,7 @@ def _save_live_run(run, session: MeasurementSession, scenario_name, seed) -> Pat
 
 
 def main() -> None:
-    build_app().queue(default_concurrency_limit=MAX_CONCURRENT_RUNS).launch(
+    build_app().queue(default_concurrency_limit=REPLAY_CONCURRENCY).launch(
         max_file_size=MAX_UPLOAD
     )
 

@@ -89,7 +89,7 @@ def test_caustic_figure_and_frame_image(saved_run) -> None:
 def test_replay_generator_ends_with_the_report(saved_run) -> None:
     updates = list(demo_app.replay(None, str(saved_run), 0.0))
     title, plot, image, budget, log, card, report, truth, run = updates[-1]
-    assert "Replay" in title
+    assert "Recorded run" in title and "not a live run" in title
     assert report["verdict"] == "estimate_not_compliant"
     assert "estimate_not_compliant" in card
     assert truth == ""  # only shown after "Reveal truth"
@@ -166,6 +166,8 @@ def test_build_app_without_launching() -> None:
 
 @pytest.fixture(autouse=True)
 def fresh_global_budget(monkeypatch):
+    for name in ("BEAMPILOT_LIVE_RUNS", "BEAMPILOT_SPEND_CAP_USD"):
+        monkeypatch.delenv(name, raising=False)
     monkeypatch.setattr(demo_app, "_GLOBAL", demo_app.GlobalBudget())
 
 
@@ -490,8 +492,11 @@ def test_replay_of_a_lens_run_shows_only_the_current_segment(tmp_path) -> None:
     assert plotted and all(abs(z - 10.0) < 1e-9 for z in plotted)
 
 
+OLD_RUNS = ("clean_operator_note", "clean_room_light_live", "mystery_s7")
+
+
 def test_old_run_files_without_segments_still_replay() -> None:
-    for path in demo_app.demo_runs():
+    for path in (demo_app.DEMO_RUNS_DIR / f"{name}.json" for name in OLD_RUNS):
         data = json.loads(path.read_text(encoding="utf-8"))
         assert "segment" not in json.dumps(data["steps"])  # written before lenses
         state = _play(load_run(path))
