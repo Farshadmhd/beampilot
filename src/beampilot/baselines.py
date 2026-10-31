@@ -58,8 +58,11 @@ EXTEND_ROUNDS = 3  # measurements towards a waist outside the measured span
 # light in the corner patches biases the background offset.
 CAUTIOUS_REJECT_FLAGS = ("beam_in_corners",)
 # After a lens change: scout at the predicted waist and at these offsets in its
-# predicted zR' (clipped to the stage; at least 4 positions remain for a fit).
+# predicted zR', clipped to the stage. Clipping can merge positions at a stage
+# end, so missing ones are added by stepping into the stage until there are
+# LENS_MIN_SCOUTS (the fit needs 4 positions).
 LENS_SCOUT_ZR = (0.0, -1.0, 1.0, -2.5, 2.5)
+LENS_MIN_SCOUTS = 4
 
 
 def suggest_verdict(evaluation: dict[str, Any]) -> str:
@@ -254,7 +257,10 @@ class _ScriptedOperator:
     def scouts_from_prediction(self, prediction: dict[str, Any]) -> list[float] | None:
         """Scout positions from the predicted new waist, the same numbers the agent
         gets: at z0', +-1 zR' and +-2.5 zR' (mean of both axes), clipped to the
-        stage.
+        stage. Positions closer than the normal minimum spacing (0.15 zR', at
+        least 1 mm) count once. If clipping leaves fewer than 4, positions are
+        added stepping into the stage from the clipped end, every
+        max(1 zR', minimum spacing), until there are 4.
 
         None (normal spread-out scout) if there is no prediction.
         """
@@ -263,11 +269,28 @@ class _ScriptedOperator:
         z0 = 0.5 * (prediction["x"]["z0_mm"] + prediction["y"]["z0_mm"])
         z_r = 0.5 * (prediction["x"]["z_r_mm"] + prediction["y"]["z_r_mm"])
         z_min, z_max = self.setup["stage_range_mm"]
+        spacing = max(MIN_SPACING_ZR * z_r, 1.0)
         scouts: list[float] = []
-        for offset in LENS_SCOUT_ZR:
-            z = round(float(np.clip(z0 + offset * z_r, z_min, z_max)), 1)
-            if all(abs(z - s) >= 1.0 for s in scouts):
+        clipped_ends: list[float] = []
+
+        def add(z: float) -> None:
+            if all(abs(z - s) >= spacing for s in scouts):
                 scouts.append(z)
+
+        for offset in LENS_SCOUT_ZR:
+            wanted = z0 + offset * z_r
+            z = round(float(np.clip(wanted, z_min, z_max)), 1)
+            if z != round(wanted, 1):
+                clipped_ends.append(z)
+            add(z)
+        step = max(z_r, spacing)
+        for end in dict.fromkeys(clipped_ends):  # each clipped end once, in order
+            direction = 1.0 if end <= z_min else -1.0
+            z = end
+            while len(scouts) < LENS_MIN_SCOUTS and z_min <= z <= z_max:
+                z = round(z + direction * step, 1)
+                if z_min <= z <= z_max:
+                    add(z)
         return scouts
 
     def exposure_for_waist(self, prediction: dict[str, Any]) -> float | None:

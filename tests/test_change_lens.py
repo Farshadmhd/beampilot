@@ -373,6 +373,25 @@ def test_scripted_scouts_come_from_the_prediction_clipped_to_the_stage() -> None
     assert operator.scouts_from_prediction({"basis": None}) is None
 
 
+@pytest.mark.parametrize("z0_mm", [0.0, 250.0])
+def test_scouts_at_a_stage_end_still_give_four_distinct_positions(z0_mm) -> None:
+    """Clipping merges positions at a stage end; scouts step into the stage."""
+    from beampilot.baselines import LENS_MIN_SCOUTS, MIN_SPACING_ZR, _ScriptedOperator
+
+    operator = _ScriptedOperator(_lens_session())
+    z_r = 18.9
+    at_end = {
+        "basis": "prediction",
+        "x": {"z0_mm": z0_mm, "z_r_mm": z_r},
+        "y": {"z0_mm": z0_mm, "z_r_mm": z_r},
+    }
+    scouts = operator.scouts_from_prediction(at_end)
+    assert len(scouts) >= LENS_MIN_SCOUTS
+    assert all(0.0 <= z <= 250.0 for z in scouts)
+    gaps = [abs(a - b) for i, a in enumerate(scouts) for b in scouts[i + 1 :]]
+    assert min(gaps) >= MIN_SPACING_ZR * z_r
+
+
 def test_lens_options_only_for_outside_not_for_uncertain() -> None:
     from beampilot.tools import _add_lens_results
 
