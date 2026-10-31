@@ -2,8 +2,9 @@
 
 Both strategies call exactly the tools the agent gets (``get_setup``,
 ``measure_at``, ``retake_darks``, ``set_status``, ``evaluate``, ``finish``, and
-``change_lens`` in setups with a lens kit) and see only their JSON results, so the comparison with the agent is fair
-(design section 8). Units follow the tool boundary: z in mm, diameters in um.
+``change_lens`` in setups with a lens kit) and see only their JSON results, so
+the comparison with the agent is fair (design section 8). Units follow the
+tool boundary: z in mm, diameters in um.
 
 - :func:`naive_uniform`: an evenly spaced scan with one fixed exposure.
 - :func:`scripted_iso`: a good-faith rule-based operator that follows
