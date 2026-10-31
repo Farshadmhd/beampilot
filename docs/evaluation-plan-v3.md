@@ -140,5 +140,5 @@ positions; not a v3 case):
      the per-run cost cap stays at **$0.50**.
    - **The total hard stop rises from $2 to $3.**
    - **Change:** only the settings in `scripts/run_evaluation_v3.py`
-     (`AGENT_CONFIG`, `BUDGET_USD`); no other code changed. The commit is recorded
-     below once it exists.
+     (`AGENT_CONFIG`, `BUDGET_USD`); no other code changed. Commit `58e1b29`.
+   - **The v3 runs use the code at `58e1b29`.**
