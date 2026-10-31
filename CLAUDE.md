@@ -14,7 +14,7 @@ agent and SAM 3.1 for beam segmentation.
   written during the hackathon. Do not import or adapt pre-existing code.
 - The repository is public and MIT licensed. Everything committed must be
   publishable.
-- Meta models must be used: Muse Spark for the agent, SAM 3.1 for segmentation.
+- SAM 3.1 is not used. Beam widths use ISO 11146 second moments, which is the method the standard prescribes. Muse Spark (Meta Model API) is the Meta model in this project.
 - Never use code, data or parameters from the maintainer's employers or
   institutes. Derive everything from public standards (ISO 11146) and textbook
   physics.
