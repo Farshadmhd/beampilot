@@ -671,7 +671,7 @@ def _lens_prediction(
         )
     }
     for axis, fit in fits.items():
-        values, stds = lens_plan.predict(fit, f_m, lens_z_m)
+        values, stds = lens_plan.predict(fit, f_m, lens_z_m, _current_lens(session))
         prediction[axis] = _waist_display(values, stds)
     return prediction
 
@@ -935,6 +935,12 @@ def _segment_fits(
     return fits
 
 
+def _current_lens(session: MeasurementSession) -> tuple[float, float] | None:
+    """(f, position) in m of the lens in the beam now, or None."""
+    lens = session.lens
+    return None if lens is None else (lens["f_m"], lens["lens_z_m"])
+
+
 def _lens_geometry(session: MeasurementSession) -> lens_plan.Geometry:
     scenario, camera = session.scenario, session.camera
     return lens_plan.Geometry(
@@ -972,7 +978,11 @@ def _add_lens_results(
     waist_out = any(result[axis]["waist_accessibility"] == "outside" for axis in fits)
     if fitted and waist_out:
         options = lens_plan.lens_options(
-            fits, kit.focal_lengths_m, kit.rail_positions_m(), _lens_geometry(session)
+            fits,
+            kit.focal_lengths_m,
+            kit.rail_positions_m(),
+            _lens_geometry(session),
+            _current_lens(session),
         )
         session.listed_lens_options = [(o.f_m, o.lens_z_m) for o in options]
         result["lens_options"] = [

@@ -127,6 +127,33 @@ def _through(d0, z0, z_r, f_m: float, lens_z_m: float):
         )
 
 
+def _undo_lens(d0, z0, z_r, current_lens: tuple[float, float] | None):
+    """Map waists measured after `current_lens` back to the original beam.
+
+    A new lens replaces the current one, so planning starts from the original
+    beam. Works on arrays; ``current_lens`` is (f, position) in m or None.
+    """
+    if current_lens is None:
+        return d0, z0, z_r
+    f_m, lens_z_m = current_lens
+    with np.errstate(invalid="ignore", divide="ignore"):
+        q_after = (lens_z_m - z0) + 1j * z_r
+        q_before = 1.0 / (1.0 / q_after + 1.0 / f_m)
+        z_r_before = q_before.imag
+        return (
+            np.sqrt(d0**2 / z_r * z_r_before),
+            lens_z_m - q_before.real,
+            z_r_before,
+        )
+
+
+def _original_waist(fit: CausticFit, current_lens) -> Waist:
+    waist = fit_waist(fit)
+    if current_lens is None:
+        return waist
+    return back_through_thin_lens(waist, *current_lens)
+
+
 def _feasible(geometry: Geometry, waists, f_m: float, lens_z_m: float):
     """Feasible on this axis (bool array) and spare points (int array)."""
     d0, z0, z_r, valid = waists
@@ -173,8 +200,12 @@ def lens_options(
     focal_lengths_m: tuple[float, ...],
     rail_m: list[float],
     geometry: Geometry,
+    current_lens: tuple[float, float] | None = None,
 ) -> list[LensOption]:
     """Feasible lens options from the fits of both axes, best first.
+
+    A new lens replaces the current one: if a lens is in the beam, the fits
+    (of the beam after it) are first mapped back to the original beam.
 
     Sorted by the feasible fraction of the draws, then by the nominal margin
     (more spare points first), then by the larger |f| and the lens closer to
@@ -190,18 +221,24 @@ def lens_options(
         Allowed lens positions in m.
     geometry : Geometry
         Stage, sensor and lens limits.
+    current_lens : tuple of float, optional
+        (f, position) in m of the lens in the beam now, or None.
 
     Returns
     -------
     list of LensOption
     """
     rng = np.random.default_rng(SEED)
-    draws = {axis: fit_draws(fit, rng) for axis, fit in fits.items()}
-    nominal = {
-        axis: tuple(np.array([v]) for v in (fit.d0_m, fit.z0_m, fit.z_r_m))
-        + (np.array([True]),)
-        for axis, fit in fits.items()
-    }
+    draws = {}
+    for axis, fit in fits.items():
+        d0, z0, z_r, valid = fit_draws(fit, rng)
+        draws[axis] = (*_undo_lens(d0, z0, z_r, current_lens), valid)
+    nominal = {}
+    for axis, fit in fits.items():
+        waist = _original_waist(fit, current_lens)
+        nominal[axis] = tuple(
+            np.array([v]) for v in (waist.d0_m, waist.z0_m, waist.z_r_m)
+        ) + (np.array([True]),)
     options = []
     for f in focal_lengths_m:
         for z_lens in rail_m:
@@ -216,7 +253,7 @@ def lens_options(
                 for axis in fits
             )
             predicted = {
-                axis: through_thin_lens(fit_waist(fit), f, z_lens)
+                axis: through_thin_lens(_original_waist(fit, current_lens), f, z_lens)
                 for axis, fit in fits.items()
             }
             options.append(LensOption(f, z_lens, fraction, margin, predicted))
@@ -232,11 +269,23 @@ def _with_std(func, fit: CausticFit) -> tuple[NDArray, NDArray | None]:
     return values, np.sqrt(np.clip(np.diag(cov), 0.0, None))
 
 
-def predict(fit: CausticFit, f_m: float, lens_z_m: float):
-    """Predicted artificial waist (d0', z0', zR' in m) and its std from the fit."""
+def predict(
+    fit: CausticFit,
+    f_m: float,
+    lens_z_m: float,
+    current_lens: tuple[float, float] | None = None,
+):
+    """Predicted artificial waist (d0', z0', zR' in m) and its std from the fit.
+
+    With a lens in the beam (`current_lens`, (f, position) in m), the fit is
+    first mapped back through it: the new lens replaces it.
+    """
 
     def forward(p: NDArray) -> list[float]:
-        new = through_thin_lens(Waist(p[0], p[1], p[0] / p[2]), f_m, lens_z_m)
+        waist = Waist(p[0], p[1], p[0] / p[2])
+        if current_lens is not None:
+            waist = back_through_thin_lens(waist, *current_lens)
+        new = through_thin_lens(waist, f_m, lens_z_m)
         return [new.d0_m, new.z0_m, new.z_r_m]
 
     return _with_std(forward, fit)

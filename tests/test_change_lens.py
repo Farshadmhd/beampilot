@@ -368,3 +368,80 @@ def test_lens_options_only_for_outside_not_for_uncertain() -> None:
         }
         _add_lens_results(session, result, fits)
         assert ("lens_options" in result) is listed
+
+
+# Review fix E1: a second change replaces the first lens in the planning too.
+
+
+def _exact_fit(waist, m2=1.4):
+    """A CausticFit of a known waist with a tiny covariance (m, m, rad)."""
+    from beampilot.caustic import CausticFit
+
+    cov = ((1e-16, 0.0, 0.0), (0.0, 1e-10, 0.0), (0.0, 0.0, 1e-12))
+    return CausticFit(
+        d0_m=waist.d0_m,
+        d0_std_m=1e-8,
+        z0_m=waist.z0_m,
+        z0_std_m=1e-5,
+        theta_rad=waist.d0_m / waist.z_r_m,
+        theta_std_rad=1e-6,
+        z_r_m=waist.z_r_m,
+        z_r_std_m=1e-5,
+        m2=m2,
+        m2_std=1e-3,
+        residual_rms=0.0,
+        n_points=10,
+        success=True,
+        cov=cov,
+    )
+
+
+def test_second_lens_is_planned_from_the_original_beam() -> None:
+    import math
+
+    from beampilot.lens import Waist
+    from beampilot.lens_plan import Geometry, lens_options, predict
+
+    d0, m2, lam = 250e-6, 1.4, 1064e-9
+    original = Waist(d0, -0.100, math.pi * d0**2 / (4 * m2 * lam))
+    first = (-0.200, -0.300)
+    after_first = through_thin_lens(original, *first)
+    fit = _exact_fit(after_first, m2)
+
+    values, _ = predict(fit, 0.040, -0.020, current_lens=first)
+    truth = through_thin_lens(original, 0.040, -0.020)
+    assert values[0] == pytest.approx(truth.d0_m, rel=1e-6)
+    assert values[1] == pytest.approx(truth.z0_m, abs=1e-7)
+    naive, _ = predict(fit, 0.040, -0.020)  # as if lens 1 stayed in place
+    assert abs(naive[1] - truth.z0_m) > 0.01
+
+    geometry = Geometry(0.0, 0.25, 0.5 * 512 * 5.5e-6, 20 * 5.5e-6, 8e-3)
+    options = lens_options(
+        {"x": fit, "y": fit},
+        (0.025, 0.040, 0.300, 0.750, -0.200),
+        LensKit().rail_positions_m(),
+        geometry,
+        current_lens=first,
+    )
+    assert options
+    for option in options:
+        expected = through_thin_lens(original, option.f_m, option.lens_z_m)
+        assert option.predicted["x"].z0_m == pytest.approx(expected.z0_m, abs=1e-7)
+        assert option.predicted["x"].d0_m == pytest.approx(expected.d0_m, rel=1e-6)
+
+
+def test_change_lens_prediction_uses_the_current_lens() -> None:
+    from beampilot.lens_plan import predict
+
+    session = _scanned(_lens_session())
+    change_lens(session, 25.0, -20.0, "test")
+    _measure_and_accept(session, [0.0, 5.0, 10.0, 15.0, 25.0, 40.0], 1.0)
+    fits = _fits(session)
+    result = change_lens(session, 40.0, -30.0, "test")
+    expected = predict(fits["x"], 0.040, -0.030, current_lens=(0.025, -0.020))[0]
+    assert result["prediction"]["x"]["z0_mm"] == pytest.approx(
+        expected[1] * 1e3, abs=1e-3
+    )
+    # The camera now sees the original beam through the second lens only.
+    true_z0 = session.beam.z0x_m * 1e3
+    assert result["prediction"]["x"]["z0_mm"] == pytest.approx(true_z0, abs=5.0)
