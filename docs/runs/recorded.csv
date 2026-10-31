@@ -1,0 +1,6 @@
+file,recorded,source
+clean_operator_note.json,2026-10-27,"date of commit becabe2, which added the file (original timestamped file not kept)"
+clean_room_light_live.json,2026-10-27,"date of commit becabe2, which added the file (original timestamped file not kept)"
+mystery_s7.json,2026-10-27,"date of commit becabe2, which added the file (original timestamped file not kept)"
+lens_v3_L5.json,2026-10-31,"evaluation v3 run, copy of runs/evaluation-v3/L5_agent.json (written 2026-10-31 20:09)"
+lens_smoke_s920.json,2026-10-31,"change_lens smoke run, copy of runs/20261031-183949_waist_outside_range_s920_muse-spark-1.2.json"

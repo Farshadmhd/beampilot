@@ -169,8 +169,9 @@ class SavedRun:
     def title(self) -> str:
         data = self.data
         verdict = (data.get("report") or {}).get("verdict", "no report")
+        name = data.get("scenario") or data.get("case") or "?"  # evaluation runs
         return (
-            f"{data.get('scenario', '?')} (seed {data.get('seed', '?')}): {verdict}, "
+            f"{name} (seed {data.get('seed', '?')}): {verdict}, "
             f"{data.get('model_calls', len(self.steps))} model calls"
         )
 
