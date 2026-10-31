@@ -107,16 +107,84 @@ def _arrays(waist: Waist):
     )
 
 
-def feasible_lenses(scenario: Scenario) -> list[tuple[float, float]]:
-    """Kit x rail lenses (f, position in m) that work for the true beam."""
+def feasible_lenses(
+    scenario: Scenario, waists: list[Waist] | None = None
+) -> list[tuple[float, float]]:
+    """Kit x rail lenses (f, position in m) that work for the true beam.
+
+    With `waists` (x and y), for those waists instead (e.g. a perturbed beam).
+    """
     geometry, kit = _geometry(scenario), scenario.lens_kit
-    waists = _true_waists(scenario)
+    waists = _true_waists(scenario) if waists is None else waists
     return [
         (f, z)
         for f in kit.focal_lengths_m
         for z in kit.rail_positions_m()
         if all(_feasible(geometry, _arrays(w), f, z)[0][0] for w in waists)
     ]
+
+
+# Margin corners: waist position, waist diameter and M², each -, 0, +.
+PERTURB_Z0_M = 0.010
+PERTURB_D0_REL = 0.10
+PERTURB_M2_REL = 0.10
+
+
+def perturbed_waists(scenario: Scenario) -> list[list[Waist]]:
+    """The 27 corner beams (x and y waists, m): z0 +-10 mm, d0 and M² +-10 %.
+
+    Includes the unperturbed beam. M² may go below 1 at a corner; the waist
+    algebra (zR = pi d0² / (4 M² lambda)) is used directly, not BeamParams.
+    """
+    wavelength = scenario.beam.wavelength_m
+    beam = scenario.beam
+    corners = []
+    for dz in (-PERTURB_Z0_M, 0.0, PERTURB_Z0_M):
+        for fd in (1 - PERTURB_D0_REL, 1.0, 1 + PERTURB_D0_REL):
+            for fm in (1 - PERTURB_M2_REL, 1.0, 1 + PERTURB_M2_REL):
+                waists = []
+                for d0, z0, m2 in (
+                    (beam.d0x_m, beam.z0x_m, beam.m2x),
+                    (beam.d0y_m, beam.z0y_m, beam.m2y),
+                ):
+                    d = d0 * fd
+                    z_r = math.pi * d**2 / (4.0 * m2 * fm * wavelength)
+                    waists.append(Waist(d, z0 + dz, z_r))
+                corners.append(waists)
+    return corners
+
+
+def best_lens(scenario: Scenario) -> tuple[float, float] | None:
+    """The feasible lens with the largest spare margin for the true beam.
+
+    Ties: the larger |f|, then the lens closer to the stage (the planner's
+    order after the feasible fraction). None if no lens is feasible.
+    """
+    geometry = _geometry(scenario)
+    waists = _true_waists(scenario)
+    scored = []
+    for f, z in feasible_lenses(scenario):
+        margin = min(int(_feasible(geometry, _arrays(w), f, z)[1][0]) for w in waists)
+        scored.append((-margin, -abs(f), -z, f, z))
+    if not scored:
+        return None
+    _, _, _, f, z = min(scored)
+    return f, z
+
+
+def margin_report(scenario: Scenario) -> tuple[int, tuple[float, float] | None, int]:
+    """Feasible lenses for the true beam, the best lens, and at how many of the
+    27 corners the best lens stays feasible."""
+    best = best_lens(scenario)
+    if best is None:
+        return 0, None, 0
+    geometry = _geometry(scenario)
+    f, z = best
+    ok = sum(
+        all(_feasible(geometry, _arrays(w), f, z)[0][0] for w in corner)
+        for corner in perturbed_waists(scenario)
+    )
+    return len(feasible_lenses(scenario)), best, ok
 
 
 def _direct_ok(scenario: Scenario) -> bool:
@@ -140,13 +208,15 @@ def oracle_verdict(scenario: Scenario) -> str:
 
 
 def choose_l8() -> tuple[LensCase, int, list[LensCase]]:
-    """The L8 beam: measurable but with no feasible kit x rail lens.
+    """The L8 beam: measurable, and no kit x rail lens works even with margin.
 
-    Grid: waist -150..-10 mm and 260..500 mm (10 mm steps), d0 150..350 um
-    (10 um steps), M² 1.0..1.8 (0.2 steps). Candidates have at least
-    ``L8_MIN_USABLE_POSITIONS`` usable stage positions and no feasible lens.
-    Chosen: the most usable positions; ties by the waist closest to a stage
-    end, then the smaller d0, then the smaller M².
+    Grid: waist -150..-10 mm and 260..500 mm (10 mm steps), d0 100..350 um
+    (10 um steps), M² 1.0..1.8 (0.2 steps). A candidate needs at least
+    ``L8_MIN_USABLE_POSITIONS`` usable stage positions, and no feasible lens
+    for the true beam **and** for each of the 27 corners of
+    :func:`perturbed_waists` (z0 +-10 mm, d0 +-10 %, M² +-10 %). Chosen: the
+    most usable positions; ties by the waist closest to a stage end, then the
+    smaller d0, then the smaller M².
 
     Returns
     -------
@@ -158,13 +228,19 @@ def choose_l8() -> tuple[LensCase, int, list[LensCase]]:
     ]
     candidates = []
     for z0 in z_values:
-        for d0_um in range(150, 351, 10):
+        for d0_um in range(100, 351, 10):
             for m2 in (1.0, 1.2, 1.4, 1.6, 1.8):
                 case = LensCase("L8", z0, d0_um * 1e-6, m2)
                 scenario = case.scenario(0)
                 usable = usable_positions(scenario)
-                if usable >= L8_MIN_USABLE_POSITIONS and not feasible_lenses(scenario):
-                    candidates.append((case, usable))
+                if usable < L8_MIN_USABLE_POSITIONS or feasible_lenses(scenario):
+                    continue
+                if any(
+                    feasible_lenses(scenario, corner)
+                    for corner in perturbed_waists(scenario)
+                ):
+                    continue
+                candidates.append((case, usable))
 
     def key(item):
         case, usable = item
@@ -188,8 +264,11 @@ CASES: list[LensCase] = [
 
 
 # Chosen by choose_l8() on 31 Oct 2026, before any v3 run (a test checks that
-# the search still returns it): 67 candidates; most usable positions (44).
-L8 = LensCase("L8", -0.020, 230e-6, 1.0)
+# the search still returns it). Margin rule: no feasible lens for the true beam
+# or any of the 27 perturbed corners; 87 qualifying candidates (d0 grid from
+# 100 um: with 150 um no candidate kept the margin); most usable positions (25).
+# Replaces the first choice (waist -20 mm, d0 230 um), which had no margin.
+L8 = LensCase("L8", 0.260, 130e-6, 1.0)
 
 
 def all_cases() -> list[LensCase]:

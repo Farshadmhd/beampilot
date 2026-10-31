@@ -29,10 +29,12 @@ def test_oracle_verdicts_of_the_v3_cases(v3) -> None:
     assert all(c.scenario(0).max_positions == 28 for c in v3.all_cases())
 
 
-def test_l8_is_measurable_without_a_feasible_lens(v3) -> None:
+def test_l8_is_measurable_without_a_feasible_lens_even_with_margin(v3) -> None:
     scenario = v3.L8.scenario(0)
     assert v3.usable_positions(scenario) >= 10
-    assert v3.feasible_lenses(scenario) == []
+    corners = v3.perturbed_waists(scenario)
+    assert len(corners) == 27
+    assert all(v3.feasible_lenses(scenario, corner) == [] for corner in corners)
 
 
 def test_l8_is_what_the_recorded_search_returns(v3) -> None:
@@ -40,7 +42,7 @@ def test_l8_is_what_the_recorded_search_returns(v3) -> None:
     assert chosen.z0_m == pytest.approx(v3.L8.z0_m)
     assert chosen.d0_m == pytest.approx(v3.L8.d0_m)
     assert chosen.m2 == pytest.approx(v3.L8.m2)
-    assert usable == 44 and len(candidates) == 67
+    assert usable == 25 and len(candidates) == 87
 
 
 def test_too_few_usable_positions_means_measurement_failed(v3) -> None:
