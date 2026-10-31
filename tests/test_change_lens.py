@@ -566,3 +566,79 @@ def test_undetermined_label_appears_in_evaluate_and_change_lens() -> None:
         option = evaluation["lens_options"][0]
         result = change_lens(session, option["f_mm"], option["lens_z_mm"], "test")
     assert result["prediction"]["label"].startswith(lens_plan.UNDETERMINED_LABEL)
+
+
+# Phase 3: the agent switch (byte-identical when off).
+
+TOOLS_SHA256 = "05c7f219a0949510e2dfbb0096dd3faefda935dfedff4437e782cca4f607fb9b"
+PROMPT_SHA256 = "957b4e434513aff3da69822aa95bd7105427cf6a0020709054e2ccffacff6194"
+PROMPT_NOVIEW_SHA256 = (
+    "b866308ef5068f109e56528785520c3018a34b34957ca13068bc02d818bd8751"
+)
+
+
+def _sha(text: str) -> str:
+    import hashlib
+
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def test_switch_off_tools_and_prompt_are_byte_identical_to_before() -> None:
+    import json
+
+    from beampilot.agent import TOOL_DEFINITIONS, system_prompt
+
+    tools_json = json.dumps(TOOL_DEFINITIONS, sort_keys=True, ensure_ascii=False)
+    assert _sha(tools_json) == TOOLS_SHA256
+    assert _sha(system_prompt()) == PROMPT_SHA256
+    assert _sha(system_prompt(False)) == PROMPT_NOVIEW_SHA256
+
+
+def _one_call_run(session, config):
+    import json
+    import sys
+
+    sys.path.insert(0, str(__import__("pathlib").Path(__file__).parent))
+    from test_agent import FakeClient, _call, _response
+
+    from beampilot.agent import run_agent
+
+    client = FakeClient(
+        [
+            _response(
+                _call("get_setup"), _call("change_lens", f_mm=25.0, lens_z_mm=-20.0)
+            ),
+            _response(_call("finish", verdict="measurement_failed", explanation="x")),
+        ]
+    )
+    run = run_agent(session, client, config)
+    return client.requests[0], run, json
+
+
+def test_switch_off_on_a_kit_scenario_sends_exactly_the_old_request() -> None:
+    from beampilot.agent import TOOL_DEFINITIONS, AgentConfig, system_prompt
+
+    request, run, _ = _one_call_run(_lens_session(), AgentConfig())
+    assert request["tools"] == TOOL_DEFINITIONS
+    assert request["instructions"] == system_prompt()
+    setup, refused = (c["result"] for c in run.steps[0]["tool_calls"])
+    assert not any(key.startswith(("lens", "source")) for key in setup)
+    assert "unknown tool 'change_lens'" in refused["error"]
+    assert "change_lens" not in refused["error"].split("tools: ")[1]
+
+
+def test_switch_on_offers_the_tool_only_with_a_lens_kit() -> None:
+    from beampilot.agent import AgentConfig, system_prompt
+
+    request, run, _ = _one_call_run(_lens_session(), AgentConfig(change_lens=True))
+    assert request["tools"][-1]["name"] == "change_lens"
+    assert "# Inaccessible waist: change_lens" in request["instructions"]
+    assert len(system_prompt(True, True).split()) <= 1650
+    lens_result = run.steps[0]["tool_calls"][1]["result"]
+    assert lens_result["segment"] == 1
+
+    no_kit = MeasurementSession(clean_scenario())
+    request, run, _ = _one_call_run(no_kit, AgentConfig(change_lens=True))
+    assert "change_lens" not in {t["name"] for t in request["tools"]}
+    assert "change_lens" not in request["instructions"]
+    assert "unknown tool" in run.steps[0]["tool_calls"][1]["result"]["error"]
