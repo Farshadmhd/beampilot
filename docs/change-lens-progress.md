@@ -19,12 +19,17 @@ Branch `add-change-lens` (not merged). Design: [change-lens-design.md](change-le
 | v3 setup | `6fda336` | `scripts/v3_cases.py`: L1–L8 with 28 positions, the oracle with lenses (incl. `measurement_failed`), the recorded L8 choice. |
 | Scout fix | `bf54e93` | After a lens, at least 4 distinct scouts (missing ones step into the stage from a clipped end). |
 | L8 margin | `4336058` | L8 re-selected with a 27-corner margin: waist +260 mm, d0 130 µm, M² 1.0. |
+| Docs | `545044c` | Design sections 6 and 8 and the margin table updated. |
+| Dry run | – | Seeds 60–75, 28 positions: 16/16 runs reach the oracle's verdict; worst errors d0 0.6 %, z0 0.012 zR, M² 1.0 %. |
+| Phase 3 | `396e2e3` | `AgentConfig(change_lens=False)`; byte-identical tools and prompt with the switch off (hash test); `prompts/change_lens.md` (1,631 words with lenses); `run_agent.py --lens --max-positions`. Live smoke run (seed 920, $0.133): `iso_compliant`, +25 mm @ −20 mm, d0 +0.2 %, z0 +0.002 zR, M² +0.3 %. |
+| Phase 4 | `2a7dfd5` + plan | Calibration on 950–957 (8/8 expected verdicts); `scripts/run_evaluation_v3.py`; `docs/evaluation-plan-v3.md`. **STOP 2: no run on 900–907 before the maintainer's OK.** |
 
 Tests: see the latest commit (`.venv\Scripts\python.exe -m pytest`).
 
 ## Next
 
-- **STOP 1**: report to the maintainer (true vs back-calculated, lens, positions).
+- **STOP 2** (now): the maintainer reviews `docs/evaluation-plan-v3.md`; after the OK, run
+  `scripts/run_evaluation_v3.py --run` and write `docs/evaluation-results-v3.md`.
 - **Phase 3**:
   - `AgentConfig(change_lens=False)`; the tool is offered only with the switch on
     and a lens kit; schema and prompt section (≤ 1,650 words with lenses);
