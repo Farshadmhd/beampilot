@@ -62,6 +62,20 @@ Tests: see the latest commit (`.venv\Scripts\python.exe -m pytest`).
 6. (Resolved.) README sentence on the focal-length tolerance (review R3).
 7. (Resolved.) Design doc: sorting by the larger spare margin, linearised a, b, c
    draws, and the collapsed-fit planning rule.
+9. **New failure in the dry run with 28 positions (L8, dev seed 74).**
+   - Only one lens option was listed, +40 mm at −20 mm, with a feasible fraction
+     of 0.155. Its predicted artificial waist sits exactly at the stage start
+     (z0' = −0.05 mm; true −0.5 mm). The scripted rule takes the first option
+     whatever its fraction.
+   - After the lens, the scout rule (z0', ±1 zR', ±2.5 zR', clipped) gives only 3
+     distinct positions (0, 18.9, 47.3 mm), because the clipped ones coincide at
+     0 mm. The fit needs 4.
+   - The scripted procedure then stops at `not_enough_data` and finishes
+     `measurement_failed` with 14 of 28 positions used. Expected:
+     `waist_not_accessible`.
+   - The code comment "at least 4 positions remain" in `baselines.py` is
+     therefore wrong at the stage edge.
+   - Stopped here for a maintainer decision; no phase 3 yet.
 8. For waists after the stage, the focal-length sensitivity is about 1.2 mm in z0
    per +1 % f (+750 mm lens), half of 0.1 zR. It is not simulated (the simulator
    uses the exact f), so the v3 tolerances do not include it.
