@@ -16,6 +16,7 @@ from typing import Any
 import numpy as np
 from numpy.typing import NDArray
 
+from beampilot.lens import Waist, through_thin_lens
 from beampilot.simulator import (
     Aperture,
     BeamParams,
@@ -54,6 +55,52 @@ class Faults:
     def __post_init__(self) -> None:
         if not self.power_factor > 0:
             raise ValueError(f"power_factor must be > 0, got {self.power_factor}")
+
+
+@dataclass(frozen=True)
+class LensKit:
+    """Lenses the operator may insert before the stage (change_lens).
+
+    All lengths in m, in the stage frame (z = 0 at the stage start, increasing
+    downstream). The lens can only go on the rail between the laser and the
+    stage start.
+
+    Parameters
+    ----------
+    focal_lengths_m : tuple of float
+        Available thin lenses (> 0 converging, < 0 diverging), in m.
+    rail_min_m, rail_max_m, rail_step_m : float
+        Allowed lens positions from min to max in steps, in m.
+    source_z_m : float
+        Laser exit position in m (upstream of the rail).
+    max_changes : int
+        Lens changes allowed per run; a later change replaces the lens.
+    max_beam_at_lens_m : float
+        Largest beam diameter at the lens in m (no clipping at the aperture).
+    """
+
+    focal_lengths_m: tuple[float, ...] = (0.025, 0.040, 0.300, 0.750, -0.200)
+    rail_min_m: float = -0.300
+    rail_max_m: float = -0.020
+    rail_step_m: float = 0.010
+    source_z_m: float = -0.400
+    max_changes: int = 2
+    max_beam_at_lens_m: float = 8e-3
+
+    def __post_init__(self) -> None:
+        if not self.focal_lengths_m or not all(
+            np.isfinite(f) and f != 0 for f in self.focal_lengths_m
+        ):
+            raise ValueError("focal_lengths_m must be finite and non-zero")
+        if not self.source_z_m < self.rail_min_m < self.rail_max_m:
+            raise ValueError("need source_z_m < rail_min_m < rail_max_m")
+        if not self.rail_step_m > 0 or self.max_changes < 1:
+            raise ValueError("rail_step_m must be > 0 and max_changes >= 1")
+
+    def rail_positions_m(self) -> list[float]:
+        """All allowed lens positions in m."""
+        n = int(round((self.rail_max_m - self.rail_min_m) / self.rail_step_m))
+        return [self.rail_min_m + k * self.rail_step_m for k in range(n + 1)]
 
 
 @dataclass(frozen=True)
@@ -96,6 +143,9 @@ class Scenario:
     drift_x_per_measurement_m : float, optional
         Slow pointing drift: the beam centre moves along x by this many m per
         measurement taken so far (the first measurement is at 0). Default 0.
+    lens_kit : LensKit, optional
+        Lenses for an artificial waist (``change_lens``). Default None: no
+        lens can be inserted, and no tool output mentions lenses.
 
     Raises
     ------
@@ -122,6 +172,7 @@ class Scenario:
     aperture: Aperture | None = None
     hot_pixels: HotPixels | None = None
     drift_x_per_measurement_m: float = 0.0
+    lens_kit: LensKit | None = None
 
     def __post_init__(self) -> None:
         if not self.stage_max_m > self.stage_min_m:
@@ -162,6 +213,8 @@ class Measurement:
         ``"pending"``, ``"accept"`` or ``"reject"``.
     frame : ndarray of uint16, optional
         First raw frame of the repeats, in counts (for ``view_frame``).
+    segment : int, optional
+        Beam segment: 0 before any lens, n after the n-th lens change.
     """
 
     measurement_id: str
@@ -177,6 +230,7 @@ class Measurement:
     suggested_verdict: str
     status: str = "pending"
     frame: NDArray[np.uint16] | None = None
+    segment: int = 0
 
 
 class MeasurementSession:
@@ -201,6 +255,11 @@ class MeasurementSession:
         self.report: dict[str, Any] | None = None
         self.positions_used = 0
         self.views_used = 0
+        # Lens state (change_lens): the hidden beam the camera sees now, the
+        # current segment and every lens change so far.
+        self.beam = scenario.beam
+        self.segment = 0
+        self.lens_changes: list[dict[str, Any]] = []
         # PNG data URLs from view_frame, handed to the agent loop by id and
         # never written to logs or run files.
         self.images: dict[str, str] = {}
@@ -322,7 +381,7 @@ class MeasurementSession:
         x0_m = self.scenario.drift_x_per_measurement_m * len(self.measurements)
         frames = [
             render_frame(
-                self.scenario.beam,
+                self.beam,
                 camera,
                 z_m,
                 exposure_ms,
@@ -347,9 +406,65 @@ class MeasurementSession:
         self.positions_used += 1
 
     def add_measurement(self, measurement: Measurement) -> None:
-        """Store a measurement under its id; costs one position."""
+        """Store a measurement under its id (current segment); costs one position."""
+        measurement.segment = self.segment
         self.measurements[measurement.measurement_id] = measurement
         self.positions_used += 1
+
+    @property
+    def lens(self) -> dict[str, Any] | None:
+        """The lens in the beam now (the latest change), or None."""
+        return self.lens_changes[-1] if self.lens_changes else None
+
+    def lens_would_clip(self, lens_z_m: float) -> bool:
+        """True if the original beam at `lens_z_m` (m) is wider than the lens allows.
+
+        Uses the hidden truth, but only as a yes/no answer: an operator would
+        see the beam overfill the lens.
+        """
+        kit = self.scenario.lens_kit
+        if kit is None:
+            return False
+        return any(
+            waist.diameter_at(lens_z_m) > kit.max_beam_at_lens_m
+            for waist in _original_waists(self.scenario.beam)
+        )
+
+    def insert_lens(self, f_m: float, lens_z_m: float) -> None:
+        """Put a thin lens in the beam; costs one position; starts a new segment.
+
+        A later change replaces the lens: the new hidden beam is always the
+        original beam through this lens only. The caller (``change_lens``)
+        checks the kit, the rail and the limits first.
+
+        Parameters
+        ----------
+        f_m : float
+            Focal length in m.
+        lens_z_m : float
+            Lens position in m (stage frame).
+        """
+        x_waist, y_waist = (
+            through_thin_lens(w, f_m, lens_z_m)
+            for w in _original_waists(self.scenario.beam)
+        )
+        self.beam = replace(
+            self.scenario.beam,
+            d0x_m=x_waist.d0_m,
+            z0x_m=x_waist.z0_m,
+            d0y_m=y_waist.d0_m,
+            z0y_m=y_waist.z0_m,
+        )
+        self.segment += 1
+        self.positions_used += 1
+        self.lens_changes.append(
+            {
+                "f_m": f_m,
+                "lens_z_m": lens_z_m,
+                "segment": self.segment,
+                "before_measurement": len(self.measurements) + 1,
+            }
+        )
 
     def next_measurement_id(self) -> str:
         """Identifier for the next measurement: ``"m1"``, ``"m2"``, ..."""
@@ -389,6 +504,17 @@ class MeasurementSession:
             offset_counts=camera.offset_counts + self.faults.extra_background_counts,
             signal_counts_per_ms=camera.signal_counts_per_ms * self.faults.power_factor,
         )
+
+
+def _original_waists(beam: BeamParams) -> tuple[Waist, Waist]:
+    """x and y waists (m) of a beam, for the lens optics."""
+    return tuple(
+        Waist(d0, z0, rayleigh_length(d0, m2, beam.wavelength_m))
+        for d0, z0, m2 in (
+            (beam.d0x_m, beam.z0x_m, beam.m2x),
+            (beam.d0y_m, beam.z0y_m, beam.m2y),
+        )
+    )
 
 
 def reveal_truth(session: MeasurementSession) -> dict[str, float | str]:
@@ -446,6 +572,12 @@ def reveal_truth(session: MeasurementSession) -> dict[str, float | str]:
     drift = session.scenario.drift_x_per_measurement_m
     if drift:
         truth["drift"] = f"beam centre x moves {drift * 1e6:+g} um per measurement"
+    if session.lens_changes:
+        truth["lens_changes"] = "; ".join(
+            f"f {c['f_m'] * 1e3:g} mm at {c['lens_z_m'] * 1e3:g} mm "
+            f"(segment {c['segment']})"
+            for c in session.lens_changes
+        )
     return truth
 
 
@@ -675,6 +807,9 @@ def session_record(session: MeasurementSession) -> dict[str, Any]:
                 None if scenario.hot_pixels is None else asdict(scenario.hot_pixels)
             ),
             "drift_x_per_measurement_m": scenario.drift_x_per_measurement_m,
+            "lens_kit": None
+            if scenario.lens_kit is None
+            else asdict(scenario.lens_kit),
             "faults": asdict(scenario.faults),
             "fault_schedule": [
                 {"after_measurements": n, "faults": asdict(f)}
@@ -682,5 +817,6 @@ def session_record(session: MeasurementSession) -> dict[str, Any]:
             ],
         },
         "fault_events": session.fault_events,
+        "lens_changes": session.lens_changes,
         "tool_log": session.log,
     }

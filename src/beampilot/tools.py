@@ -1,5 +1,8 @@
 """The seven agent tools (design section 4), as plain functions on a session.
 
+``change_lens`` is an eighth tool, only for setups with a lens kit
+(docs/change-lens-design.md).
+
 Every tool takes a required `reason` (``finish`` uses its `explanation`),
 returns a JSON-serialisable dict, and never raises: bad input gives
 ``{"error": "..."}`` with a helpful message, and any unexpected exception
@@ -174,6 +177,16 @@ def get_setup(session: MeasurementSession, reason: str) -> dict[str, Any]:
     }
     if scenario.max_views > 0:  # no view budget: the tool is not offered
         setup["views_left"] = session.views_left
+    kit = scenario.lens_kit
+    if kit is not None:  # no kit: the lens tool is not offered
+        setup["lens_kit_mm"] = [_num(f * 1e3, 3) for f in kit.focal_lengths_m]
+        setup["lens_rail_mm"] = [
+            _num(kit.rail_min_m * 1e3, 3),
+            _num(kit.rail_max_m * 1e3, 3),
+            _num(kit.rail_step_m * 1e3, 3),
+        ]
+        setup["source_z_mm"] = _num(kit.source_z_m * 1e3, 3)
+        setup["lens_changes_left"] = kit.max_changes - len(session.lens_changes)
     return setup
 
 
@@ -330,7 +343,7 @@ def measure_at(
         frame=frames[0].astype(np.uint16),  # 12-bit counts: half the memory
     )
     session.add_measurement(measurement)
-    return {
+    result = {
         "measurement_id": measurement.measurement_id,
         "z_mm": _num(z_mm, 3),
         "exposure_ms": _num(exposure_ms, 4),
@@ -350,6 +363,9 @@ def measure_at(
         "warnings": warnings,
         "details": details,
     }
+    if session.scenario.lens_kit is not None:
+        result["segment"] = measurement.segment
+    return result
 
 
 @_tool()
@@ -477,6 +493,12 @@ def set_status(
         )
     if status not in ("accept", "reject"):
         raise ToolInputError(f"status must be 'accept' or 'reject', got {status!r}")
+    if measurement.segment != session.segment:
+        raise ToolInputError(
+            f"{measurement_id} belongs to the beam before the lens change "
+            f"(segment {measurement.segment}, now {session.segment}); it no longer "
+            "enters any fit"
+        )
     if status == "accept" and measurement.flags["saturated"]:
         raise ToolInputError(
             f"{measurement_id} is saturated and cannot be accepted; measure again "
@@ -528,6 +550,77 @@ def evaluate(session: MeasurementSession, reason: str) -> dict[str, Any]:
         ``status`` ``"not_enough_data"`` with a message and the table.
     """
     return _evaluation(session)
+
+
+@_tool()
+def change_lens(
+    session: MeasurementSession, f_mm: float, lens_z_mm: float, reason: str
+) -> dict[str, Any]:
+    """Insert a thin lens before the stage to form an artificial waist.
+
+    Only for setups with a lens kit (``get_setup`` lists it). Costs one
+    position. A new beam segment starts: earlier measurements no longer enter
+    any fit and cannot change status. A later change replaces the lens (the
+    original beam through the new lens only). Refused for a focal length
+    outside the kit, a position off the rail, no changes or positions left,
+    or a beam that would overfill the lens at that position.
+
+    Parameters
+    ----------
+    session : MeasurementSession
+        The run.
+    f_mm : float
+        Focal length in mm, one of ``lens_kit_mm``.
+    lens_z_mm : float
+        Lens position in mm (stage frame), on ``lens_rail_mm``.
+    reason : str
+        Why.
+
+    Returns
+    -------
+    dict
+        The lens (focal length and position in mm), the new segment, positions
+        and lens changes left, and a note on the new segment.
+    """
+    kit = session.scenario.lens_kit
+    if kit is None:
+        raise ToolInputError("this setup has no lens kit")
+    f_m = _input_number(f_mm, "f_mm") * 1e-3
+    lens_z_m = _input_number(lens_z_mm, "lens_z_mm") * 1e-3
+    if not any(abs(f_m - f) <= 1e-9 for f in kit.focal_lengths_m):
+        kit_mm = ", ".join(f"{f * 1e3:g}" for f in kit.focal_lengths_m)
+        raise ToolInputError(f"f_mm must be one of the kit: {kit_mm}")
+    steps = (lens_z_m - kit.rail_min_m) / kit.rail_step_m
+    if not (
+        kit.rail_min_m - 1e-9 <= lens_z_m <= kit.rail_max_m + 1e-9
+        and abs(steps - round(steps)) < 1e-6
+    ):
+        raise ToolInputError(
+            f"lens_z_mm must be on the rail: {kit.rail_min_m * 1e3:g} to "
+            f"{kit.rail_max_m * 1e3:g} mm in steps of {kit.rail_step_m * 1e3:g} mm"
+        )
+    lens_z_m = kit.rail_min_m + round(steps) * kit.rail_step_m
+    if len(session.lens_changes) >= kit.max_changes:
+        raise ToolInputError(f"no lens changes left ({kit.max_changes} per run)")
+    if session.positions_left <= 0:
+        raise ToolInputError("position budget used up; call evaluate and finish")
+    if session.lens_would_clip(lens_z_m):
+        raise ToolInputError(
+            f"the beam overfills the lens at {lens_z_m * 1e3:g} mm (wider than "
+            f"{kit.max_beam_at_lens_m * 1e3:g} mm); choose another position or lens"
+        )
+    session.insert_lens(f_m, lens_z_m)
+    return {
+        "f_mm": _num(f_m * 1e3, 3),
+        "lens_z_mm": _num(lens_z_m * 1e3, 3),
+        "segment": session.segment,
+        "positions_left": session.positions_left,
+        "lens_changes_left": kit.max_changes - len(session.lens_changes),
+        "note": (
+            f"New beam segment {session.segment}: earlier measurements no longer "
+            "enter any fit. Scout the new beam again."
+        ),
+    }
 
 
 @_tool(reason_arg="explanation")
@@ -604,7 +697,7 @@ def _waist_not_accessible_problem(
         return "not enough data to locate the waist"
     scenario = session.scenario
     margin = STAGE_END_FRACTION * (scenario.stage_max_m - scenario.stage_min_m)
-    accepted = [m.z_m for m in session.measurements.values() if m.status == "accept"]
+    accepted = [m.z_m for m in _accepted_now(session)]
     outside = []
     for axis in ("x", "y"):
         result = evaluation[axis]
@@ -683,8 +776,9 @@ def _write_report(
 
 def _evaluation(session: MeasurementSession) -> dict[str, Any]:
     """Fit and checks on the accepted measurements, in display units."""
-    table = [_table_row(m) for m in session.measurements.values()]
-    accepted = [m for m in session.measurements.values() if m.status == "accept"]
+    with_segment = session.scenario.lens_kit is not None
+    table = [_table_row(m, with_segment) for m in session.measurements.values()]
+    accepted = _accepted_now(session)
     z_positions = sorted({m.z_m for m in accepted})
     if len(z_positions) < MIN_FIT_POSITIONS:
         return {
@@ -848,8 +942,8 @@ def _waist_accessibility(
     return "uncertain", "start" if fit.z0_m < centre else "end"
 
 
-def _table_row(m: Measurement) -> dict[str, Any]:
-    return {
+def _table_row(m: Measurement, with_segment: bool = False) -> dict[str, Any]:
+    row = {
         "id": m.measurement_id,
         "z_mm": _num(m.z_m * 1e3, 3),
         "d_x_um": _num(m.d_x_mean_m * 1e6, 1),
@@ -858,6 +952,18 @@ def _table_row(m: Measurement) -> dict[str, Any]:
         "suggested": m.suggested_verdict,
         "flags": [name for name, value in m.flags.items() if value],
     }
+    if with_segment:
+        row["segment"] = m.segment
+    return row
+
+
+def _accepted_now(session: MeasurementSession) -> list[Measurement]:
+    """Accepted measurements of the current beam segment (the only fit data)."""
+    return [
+        m
+        for m in session.measurements.values()
+        if m.status == "accept" and m.segment == session.segment
+    ]
 
 
 def _clipping_loss(
