@@ -21,7 +21,8 @@ a verdict with a short explanation: `iso_compliant`, `estimate_not_compliant`,
 `waist_not_accessible`, `general_astigmatism_out_of_scope` or `measurement_failed`.
 
 It works only through 7 tools: `get_setup`, `measure_at`, `set_status`, `evaluate`,
-`retake_darks`, `view_frame` and `finish`. All physics is done in Python: ISO
+`retake_darks`, `view_frame` and `finish`, plus an optional eighth, `change_lens`,
+behind a switch (see "Inaccessible waist" below). All physics is done in Python: ISO
 second-moment widths with the iterated 3·d integration area, and a weighted caustic
 fit. The report numbers come from session state, never from the model's text. The
 controller enforces hard limits on positions, model calls, tokens and cost. Design:
@@ -87,15 +88,64 @@ differences are noise. Full tables: [docs/evaluation-summary.md](docs/evaluation
 - **v2 changes:** raising the call limit and asking for parallel tool calls removed
   all runs stopped by the limit, and cut model calls per run by about a quarter.
 
+## Inaccessible waist: artificial waist with change_lens
+
+When the beam waist lies outside the stage, the agent can insert one thin lens
+before the stage with the optional tool `change_lens(f_mm, lens_z_mm)`, forming an
+artificial waist inside the stage.
+- **Before the lens:** Python lists lens options (a small kit of +25, +40, +300,
+  +750 and −200 mm on a rail at −300…−20 mm), scored from the caustic fit only,
+  never from the hidden truth.
+- **After the lens:** the agent measures the new beam to the ISO 11146-1 rules.
+- **Report:** M², unchanged by an ideal lens, and the original waist (d0, z0, zR),
+  calculated back through the inverse thin-lens matrix, with its uncertainty and
+  its sensitivity to the focal length.
+
+This is reported as **"ISO 11146-1 procedure applied at an artificial waist
+(thin-lens model)"**. The parts of ISO 11146-1 on artificial waists have not been
+checked against the official text.
+
+**Switch:** off by default (`AgentConfig(change_lens=False)`; the "Lens kit"
+checkbox in the demo). Off, the agent's tools and prompt are byte-identical to
+before.
+
+**Simplifications:**
+- a thin, paraxial, aberration-free lens;
+- exact focal length and position, centred and not tilted;
+- no clipping at the lens aperture;
+- no reflections from the lens;
+- the embedded-Gaussian beam model;
+- the same spherical lens for x and y.
+
+If a real lens is 1 % longer than its nominal focal length, the reported z0 is off
+by minus the listed 'per +1 % f' value.
+
+**Evaluation v3** (pre-registered, 8 waist-outside beams, one run each, $0.97):
+- **Agent and scripted operator tie:** 8 of 8 verdicts right each, and 7 of 7 lens
+  cases within tolerance each (M² 3 %, back-calculated d0 5 % and z0 0.1 zR; mostly
+  well under 1 %). Both include one honest `waist_not_accessible` where no kit lens
+  could help. The naive scan, which never uses a lens, got 1 of 8.
+- **The agent took the first Python-ranked lens option in every case.** So v3
+  shows that the feature works end to end. It does **not** show that the model
+  chooses lenses better than a fixed rule.
+- **L7:** with the agent's lens (+750 mm at −130 mm), a focal length 1 % longer
+  moves z0 by 3.4 mm, which equals the 0.1 zR tolerance. The simulator uses the
+  exact f, so this does not show in the result.
+- **Caveats:** the cases were not held out, and two of them (L1, L4) are close to
+  the edge of what the kit can do. Details:
+  [docs/evaluation-results-v3.md](docs/evaluation-results-v3.md).
+
 ## How it's tested
 
-- **284 pytest tests**, including physics known-answer tests:
+- **359 pytest tests**, including physics known-answer tests:
   - an analytic Gaussian gives the right second moments, and a noiseless simulated
     caustic gives back the true M² (including M² = 1);
   - an M² fit on 2 % noise is unbiased;
   - near-waist-only sampling inflates the uncertainty;
   - a ghost's widths match the two-spot mixture moments;
   - an iris matches the truncated-Gaussian moments;
+  - a thin lens matches the textbook focus formula (Self 1983), keeps M², and
+    forward then inverse returns the original beam;
   - background offsets are removed without clipping negative pixels.
 - The agent loop is tested with a fake client, without API calls. The evaluation
   summary and the hero figure are checked against their generators.
@@ -114,6 +164,9 @@ differences are noise. Full tables: [docs/evaluation-summary.md](docs/evaluation
   "ISO compliant".
 - **Small evaluation.** One run per case per evaluation, on a single model and
   setting.
+- **Artificial waist (change_lens).** The lens is modelled as an exact thin lens.
+  If a real lens is 1 % longer than its nominal focal length, the reported z0 is off
+  by minus the listed 'per +1 % f' value.
 
 ## Hackathon provenance
 

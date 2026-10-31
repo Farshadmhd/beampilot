@@ -31,6 +31,17 @@ agent.
 - Baseten: base URL https://inference.baseten.co/v1, model exactly "meta-models/muse-spark-open-1026" (Muse Spark Open, Meta open weights). Key in its own env var, listed in .env.example. Optional second backend for comparison.
 - "Baseten" is a company name, not a typo of "baseline". Never remove or rename Baseten entries in .env.example or the code.
 
+## change_lens switch
+- `change_lens` (artificial waist, `docs/change-lens-design.md`) is offered only when
+  `AgentConfig(change_lens=True)` and the scenario has a `LensKit`. The default is
+  off; then tools, schemas and system prompt are byte-identical to the v1/v2 agent
+  (a hash test guards this). Keep it that way: never let lens code change the
+  switch-off path.
+- Everything the agent sees about a lens is computed from the fit, never from the
+  hidden beam (only the 8 mm clipping refusal uses the truth, as a yes/no).
+- Report wording: "ISO 11146-1 procedure applied at an artificial waist (thin-lens
+  model)", never "ISO compliant for the original beam".
+
 ## Data
 - Use simulated beam images (with known ground truth) or openly licensed data
   only. Record the source and licence of any external data.

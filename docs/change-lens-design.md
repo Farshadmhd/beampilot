@@ -1,0 +1,461 @@
+# change_lens: design (artificial waist for an inaccessible waist)
+
+Status: approved 31 Oct 2026 with the corrections below folded in; branch
+`add-change-lens`. This is the stretch tool from [agent-design.md](agent-design.md)
+(section 4). The freeze on agent, prompt and tools is lifted for this feature only.
+
+**Switch.** `AgentConfig(change_lens=False)` by default, and no existing scenario has
+a lens kit. The tool is offered to the agent only when **both** the config switch is
+on **and** the session has a lens kit. With the switch off, the tool list, the tool
+schemas and the system prompt are **byte-identical** to before this feature (a test
+checks this), so v1 and v2 stay reproducible.
+
+**No truth leak.** The simulator renders measurements after a lens change from the
+**true** beam through the lens, because that is what a camera would see. Everything
+the agent is told is computed from the **fit** only:
+- the prediction returned by `change_lens`;
+- `lens_options` in `evaluate`;
+- the back-calculated original beam.
+
+The one truth-based check is the 8 mm aperture refusal. It is a yes/no answer
+without numbers, as an operator would see the beam overfill the lens. A test uses a
+session whose fit is deliberately shifted from the truth, and checks that the
+prediction follows the fit, not the truth.
+
+## Goal
+
+When a waist lies outside the stage, the agent may insert one thin, aberration-free
+lens before the stage. The lens forms an **artificial waist** inside the stage. The
+agent measures that waist to ISO 11146-1 and reports two things:
+- M² (unchanged by an ideal lens);
+- the original beam (d0, z0, zR per axis), **calculated back** through the inverse
+  ABCD matrix.
+
+All numbers come from Python; the model only chooses the lens, where to measure,
+and the verdict.
+
+## 1. Physics (per axis, x and y independently)
+
+**Embedded Gaussian.** A beam with M² is treated as a Gaussian of "effective
+wavelength" M²·λ (as in the simulator). With the second-moment waist radius
+W0 = d0/2:
+
+- zR = π W0² / (M² λ)
+- q(z) = (z − z0) + i·zR (complex beam parameter; the real part is the distance
+  from the waist).
+- Diameter anywhere: d(z) = d0 · |q(z)| / zR.
+
+**ABCD matrices** (paraxial, SI inside Python):
+
+- Free space over a length L: [[1, L], [0, 1]]
+- Thin lens of focal length f (f > 0 converging, f < 0 diverging): [[1, 0], [−1/f, 1]]
+- Transformation: q' = (A·q + B) / (C·q + D). For the thin lens alone this is
+  1/q' = 1/q − 1/f.
+
+**Forward: original beam to artificial waist.** Lens at z_L:
+1. Take the original q just before the lens: q_L = (z_L − z0) + i·zR.
+2. Apply the lens: q_L' = 1 / (1/q_L − 1/f).
+3. The new waist is at z0' = z_L − Re(q_L'), with zR' = Im(q_L') and
+   W0' = sqrt(zR' · M² λ / π).
+
+M² is unchanged, because the ABCD matrices are real with determinant 1 and the
+embedded-Gaussian picture holds exactly for them. The textbook form (Self 1983)
+gives the same result. With s = z_L − z0 (the original waist s before the lens):
+- s' = f + (s − f) f² / ((s − f)² + zR²)
+- magnification m = f / sqrt((s − f)² + zR²)
+- W0' = m·W0, zR' = m²·zR
+
+**Back-propagation: measured artificial waist to original beam.** The fit after the
+lens gives z0', zR' and M² per axis.
+1. q_L' = (z_L − z0') + i·zR' at the lens, just after it.
+2. Invert the lens: q_L = 1 / (1/q_L' + 1/f).
+3. The original waist is at z0 = z_L − Re(q_L), with zR = Im(q_L) and
+   W0 = sqrt(zR · M² λ / π).
+
+For a general ABCD this is the inverse matrix [[D, −B], [−C, A]] (det = 1).
+
+**Uncertainties.** σ of the back-calculated d0, z0 and zR are propagated from the
+caustic fit's covariance (first order, numerical Jacobian of the function above).
+They are statistical only: the lens focal length and position are assumed exact
+(see the simplifications).
+
+**Focal-length sensitivity.** For the back-calculated original beam, `evaluate` and
+`finish` also report "dz0 per +1 % f" (mm) and "dd0 per +1 % f" (µm). Both come from
+a numerical derivative: the back-calculation repeated with f × 1.01.
+
+**Units.** SI (m) in Python. At the tool boundary, as for every other tool:
+f and positions in mm, diameters in µm, wavelength in nm.
+
+**Simplifications (stated in the report and the README):**
+1. Thin lens (no thickness, no principal-plane offset).
+2. Paraxial optics.
+3. No aberrations (spherical, chromatic or astigmatic).
+4. The lens is perfectly centred and not tilted, and its focal length and
+   position are exact. Real lenses have about ±1 % focal-length tolerance, which
+   can dominate the error in z0 for short focal lengths; the simulator uses the
+   exact f. The reported sensitivity per +1 % f shows the size of that effect.
+5. The lens aperture does not clip the beam. The tool refuses a placement where
+   the beam diameter at the lens exceeds 8 mm (a 25.4 mm lens: more than 3 beam
+   radii of margin).
+6. No Fresnel losses or back-reflections, so no ghost from the lens.
+7. Embedded-Gaussian model: a real multimode beam is not exactly Gaussian, but
+   second moments still transform by ABCD. That is the property ISO relies on;
+   to be verified (section 10).
+8. Same lens for x and y (spherical). Simple astigmatism is handled per axis;
+   general astigmatism stays out of scope.
+
+## 2. Geometry
+
+- **Axis:** z along the beam, increasing downstream. **z = 0 is the stage start**
+  (the camera's closest position); the stage runs 0–250 mm, the same coordinates
+  the agent already uses.
+- **Laser exit (source) at z = −400 mm**, fixed and public (in `get_setup`). An
+  original waist may lie anywhere, even upstream of the source (a virtual waist of
+  a diverging laser); the algebra does not care.
+- **Lens rail:** the lens can only go between the source and the stage start:
+  `lens_z_mm` from −300 to −20 mm in 10 mm steps (29 positions). There are at least
+  100 mm to the laser and 20 mm of clearance to the camera.
+
+**Two cases:**
+- **Waist before the stage start (z0 < 0).** The beam is already diverging at the
+  stage. Two options:
+  - a short converging lens after the waist (f smaller than the waist-to-lens
+    distance, here 25–40 mm) re-images it into the stage;
+  - a diverging lens before the waist (−200 mm) pushes it downstream.
+
+  There are few workable options (1–5 per beam in the exploration below), so the
+  choice must be computed, not guessed.
+- **Waist after the stage end (z0 > 250 mm).** The beam converges through the
+  stage. A long converging lens (300–750 mm) pulls the waist upstream into the
+  stage. It also shrinks it, so the 20-pixel minimum (d0' ≥ 110 µm) is what limits
+  this case.
+
+**Lens kit** (standard catalogue focal lengths): **+25, +40, +300, +750, −200 mm**.
+
+A design-time exploration (a scratch script, not committed; the implementation
+redoes it with the real lens module and a test) used the existing camera (512 px of
+5.5 µm), the 0–250 mm stage, 1064 nm, and the plan's coverage oracle (room for 5
+near and 5 far points, far diameter ≤ half the sensor). It searched 99 grid beams:
+- waists at −150…−20 mm and 260…450 mm;
+- d0 160–300 µm;
+- M² 1.0–1.8.
+
+Results:
+- **88 of the 99 beams** can be solved by some catalogue lens (25–1000 mm, ±).
+- +40, +750 and −200 mm alone cover 87 of them; adding +25 mm covers all 88.
+- +300 mm is in the kit for robustness (several large-M² cases).
+- The other 11 beams cannot be solved with this camera and stage: they make good
+  "honest `waist_not_accessible`" cases.
+
+## 3. Tool interface
+
+```
+change_lens(f_mm, lens_z_mm, reason)
+```
+
+- **`f_mm`** must be one of the kit values. **`lens_z_mm`** must be a rail
+  position.
+- **Cost:** 1 position from the budget (mounting and realignment). **At most 2
+  lens changes per run.** A second change **replaces** the first lens: segment 2
+  is the original beam through the new lens only, and the back-calculation uses
+  only the current lens. There is no "remove" call.
+- A combination that `evaluate` did not list in `lens_options` is still accepted
+  if kit and rail allow it, and the output says so (`"listed_option": false`).
+- **Refused** (error result, nothing changes) for: a value outside the kit or the
+  rail, a third change, the beam at the lens over 8 mm, or a finished run.
+- **Effect:** a new **beam segment** starts (section 4). Darks stay valid (the
+  lens does not change the background).
+- **Returns:**
+  - the lens (f_mm, lens_z_mm), `segment` (1 or 2), `positions_left`,
+    `lens_changes_left`;
+  - `prediction`: per axis, the predicted d0' (µm), z0' (mm) and zR' (mm), with σ,
+    computed from the **current fit** of the old segment. It is **marked as a
+    prediction** (`"basis": "fit of segment 0 (extrapolated waist)"`). If no fit
+    exists, it is null with a reason.
+  - a reminder that measurements of the old segment no longer enter any fit.
+
+**Choosing a lens without guessing.** When `evaluate` reports an axis as `outside`
+and the lens tool is offered, its result gains a `lens_options` list. For
+`uncertain` there are no options: `evaluate` keeps its advice to measure closer to
+that stage end first (decided 31 Oct 2026).
+- **Source.** The options come from the **internal fit** of each axis: the
+  coefficients a, b, c of d² = a + b z + c z² and their covariance. The reported
+  d0, z0 and zR are null when the waist is outside, so they cannot be used.
+- **Draws.** Python draws **200 samples** per axis, with a **fixed RNG seed** so the
+  scripted operator stays deterministic. The fit is parametrised by d0, z0 and θ;
+  the draws are made in a, b, c from a covariance **linearised** to a, b, c (first
+  order, numerical Jacobian of a = d0² + θ²z0², b = −2θ²z0, c = θ²). A draw with
+  c ≤ 0 or 4ac − b² ≤ 0 counts as infeasible.
+- **Waist diameter not determined (collapsed far-field fit).** A far-field-only
+  fit can collapse towards d0 = 0 while z0 and θ stay well determined. The waist
+  diameter counts as not determined when 4ac − b² ≤ 0, σ(d0)/d0 > 0.5, or the
+  fitted M² < 0.9. Then that axis is planned from θ and z0 only: b and c are drawn
+  from the linearised covariance (θ = √c, z0 = −b/(2c)), M² is drawn uniformly in
+  [1, 2], and d0 = 4λ·M²/(π·θ) for each draw. The nominal predicted values use
+  M² = 1.5. The options and the `change_lens` prediction carry the label "waist
+  diameter not determined; options assume M² between 1 and 2". This applies
+  inside lens planning only; `fit_caustic` is unchanged (decided 31 Oct 2026).
+- **Feasibility.** For each kit × rail combination, Python computes the fraction of
+  draws in which it is feasible on both axes: predicted z0' inside the stage,
+  d0' ≥ 110 µm, room for 5 near and 5 far points, and the beam at the lens
+  ≤ 8 mm by the fit.
+- **Ranking.** Options are sorted by that fraction, then by the **larger** spare
+  margin (the margin is the least spare room of near/far points over both axes,
+  for the nominal fit), then by the larger |f|, then by the lens closer to the
+  stage.
+  **At most 5** are listed, each with its fraction and the nominal predicted d0',
+  z0' and zR' per axis.
+
+The agent picks from these numbers; it never computes optics itself.
+
+`get_setup` shows `lens_kit_mm`, `lens_rail_mm` (min, max, step), `source_z_mm`
+and `lens_changes_left`, and only when the scenario enables lenses. The system
+prompt gets a short "Inaccessible waist: change_lens" section, also only when
+enabled (like the `view_frame` section).
+
+**Prompt length (decided).** Up to 1,650 words, only when lenses are enabled. The
+base prompt test stays at 1,500 words.
+
+## 4. Session: before and after the lens are different beams
+
+- `MeasurementSession.segment` starts at 0. Each `change_lens` increments it and
+  stores the lens (f, z_L) and the **transformed hidden beam**: the true original
+  beam through the current lens only, per axis d0', z0', same M². The simulator
+  stays unchanged, because the session simply renders with the transformed
+  `BeamParams`. The agent never sees these true values.
+- Every `Measurement` records its `segment`. Ids keep counting (m1, m2, …), so the
+  log stays readable.
+- **`evaluate` fits only the accepted measurements of the current segment.** The
+  table still lists all measurements, with a `segment` column.
+- **Old points never enter a new fit.** `set_status` on a measurement from an
+  earlier segment is refused ("belongs to the beam before the lens change"). The
+  fit filters by segment as well, so the protection does not rely on statuses.
+- Coverage, the near-point rule, waist accessibility, the general-astigmatism check
+  and the M² < 1 flag apply to the current segment only.
+- The run file records the segment of every measurement and each lens change
+  (when, f, z_L), so replay can draw the segments separately.
+
+## 5. evaluate and finish
+
+**`evaluate`** (current segment) reports, per axis:
+- the usual fit: d0, z0, zR and M², with σ;
+- `lens_options` when the waist is outside (section 3);
+- after a lens change, also `original_beam_back_calculated`: d0, z0 and zR with σ,
+  computed by Python from the fit as in section 1 and marked
+  `"calculated, not measured"`. It includes "dz0 per +1 % f" and "dd0 per +1 % f".
+
+**`finish`** writes the report from session state as today, plus:
+- `method`: `"direct"` or `"artificial_waist"`;
+- `lens`: f_mm, lens_z_mm, segment, and before which measurement it was inserted;
+- `artificial_waist`: per axis, the measured d0', z0' and zR', with σ;
+- `original_beam_back_calculated`: per axis, d0, z0 and zR, with σ, and the
+  focal-length sensitivity;
+- `m2`: per axis, from the artificial-waist fit (the ISO quantity);
+- the list of simplifications from section 1.
+
+**Verdicts stay the same five.** `iso_compliant` applies when the **measured
+artificial-waist caustic** meets the ISO rules on both axes (coverage, no general
+astigmatism, no M² < 1 flag), with `method = "artificial_waist"`. No new verdict is
+needed: the method field says how it was obtained. Whether ISO calls this compliant
+for the original beam is the question in section 10; the report wording stays "ISO
+11146-1 caustic measured at an artificial waist" until that is verified.
+
+**Guards:**
+- The existing `finish` guards apply to the current segment.
+- `waist_not_accessible` is still allowed when a lens kit exists (honest when no
+  option is feasible). The agent is **not** forced to use a lens; that stays a
+  judgement scored by the evaluation.
+
+The numbers in the report never come from the model; the free-text explanation
+remains unchecked, as today.
+
+## 6. Scripted baseline (fair comparison)
+
+The scripted operator gets the same information as the agent and a fixed rule
+(state of 31 Oct 2026):
+1. It runs its normal procedure.
+2. If its rules give `waist_not_accessible` (an axis `outside`, after approaching
+   that stage end, as the guard requires) and `evaluate` lists `lens_options`, it
+   takes the **first listed option**. These are the same Python numbers the agent
+   sees, already ranked by the feasible fraction of the fit draws, then the
+   larger spare margin, then the larger |f|, then the lens closer to the stage.
+   There is no minimum fraction (decided 31 Oct 2026).
+3. It calls `change_lens`, then scouts the new beam from the prediction it
+   returns, the same the agent gets:
+   - at z0', ±1 zR' and ±2.5 zR', clipped to the stage;
+   - positions closer than the normal minimum spacing (0.15 zR', at least 1 mm)
+     count once;
+   - if clipping leaves fewer than 4, positions are added stepping into the stage
+     from the clipped end, every max(1 zR', minimum spacing), until there are 4;
+   - the first exposure is scaled from the predicted d0'.
+
+   Then it continues with its normal fill procedure.
+4. If no option is listed, it finishes `waist_not_accessible`, as before.
+5. At most one lens change; it never tries a second.
+
+The naive scan never uses a lens (reference only).
+
+## 7. Known-answer tests
+
+1. **Textbook focus:** an ideal Gaussian (M² = 1) through a thin lens matches the
+   Self (1983) s', m and W0' to 1e-9 relative, for several s/f ratios. That
+   includes s = f, where s' = f, and both signs of f.
+2. **M² unchanged:**
+   - analytically, q algebra keeps M², i.e. zR'·π/(W0'²λ) is the same;
+   - numerically, a noiseless simulated caustic after the lens fits the input M²
+     to 0.1 %.
+3. **Round trip:** forward then inverse gives back d0, z0 and zR to 1e-9 relative
+   for random beams, lenses and positions, including a lens upstream of the waist.
+4. **Unit error caught:** feeding f in mm where m is expected (a factor 1e3) must
+   make the textbook test and the round trip fail. A test asserts that the wrong
+   scale changes z0' by much more than the tolerance.
+5. **Thin-lens limits:**
+   - a lens at the original waist gives zR' = zR·f²/(f² + zR²) (the known
+     special case);
+   - f → ±∞ leaves the beam unchanged.
+6. **Session separation:**
+   - after `change_lens`, `evaluate` uses only the new segment;
+   - `set_status` on old ids is refused;
+   - points from the old segment never appear in the fit, even if they were
+     accepted.
+7. **End to end:** a waist-outside scenario plus the chosen kit lens and the
+   simulated measurements meets the shared tolerances:
+   - M² within 3 % on both axes;
+   - the back-calculated original d0 within 5 %;
+   - z0 within 0.1 × the true original zR.
+
+   This runs with the scripted baseline, so there are no API calls.
+8. **Tool contract:**
+   - kit and rail are enforced, as are the change limit and the 8 mm clipping
+     refusal;
+   - the prediction is labelled as such;
+   - an unlisted combination is accepted and flagged;
+   - a second change uses the original beam through the new lens only;
+   - with the switch off, the tool list, schemas and system prompt are
+     byte-identical to before.
+9. **No truth leak:** a session whose fit is deliberately shifted from the truth
+   returns a `change_lens` prediction, `lens_options` and a back-calculated beam
+   that follow the fit, not the truth.
+10. **Replay:** a run file with `change_lens` calls replays, and an old run file
+    without segment fields still replays.
+
+## 8. Mini-evaluation v3 (to be pre-registered before any run)
+
+`docs/evaluation-plan-v3.md` will be committed **before any v3 run and after the
+code is merged**, the same way as v1 and v2. v1 and v2 stay unchanged.
+
+**Cases:** 8 waist-outside beams, each with a lens kit and **28 positions** for
+every contender (decided 31 Oct 2026). Seeds **900–907** (never used so far: 0–99,
+100, 200–204, 300–304, 500, 600–604, 700–704, 1000–1009 and 3000–3009 are
+taken). Definitions and the oracle are in `scripts/v3_cases.py`.
+
+| Case | Waist z0 (mm) | d0 (µm) | M² | Oracle verdict |
+|---|---|---|---|---|
+| L1 | −30 | 200 | 1.2 | iso_compliant |
+| L2 | −60 | 200 | 1.2 | iso_compliant |
+| L3 | −100 | 250 | 1.4 | iso_compliant |
+| L4 | −80 | 160 | 1.0 | iso_compliant |
+| L5 | 280 | 200 | 1.2 | iso_compliant |
+| L6 | 320 | 300 | 1.6 | iso_compliant |
+| L7 | 380 | 250 | 1.4 | iso_compliant |
+| L8 | 260 | 130 | 1.0 | waist_not_accessible |
+
+**Oracle with lenses** (applied to the true beam):
+1. `measurement_failed` if fewer than 5 stage positions (5 mm grid) give a usable
+   beam size: at least 20 px across and at most half the smaller sensor side.
+2. Waist inside the stage: the v1 coverage rule (room for 5 near and 5 far points
+   per axis).
+3. Waist outside: `iso_compliant` if any kit × rail lens makes an artificial waist
+   that passes the same rule on both axes (inside the stage, ≥ 20 px, no clipping
+   at the lens), otherwise `waist_not_accessible`.
+
+**L8 selection with margin.** The first L8 (waist at 450 mm) had no usable stage
+position. The second (−20 mm, 230 µm) had no margin, and the scripted dry run hit
+a barely-listed option there. L8 is now chosen by a recorded search:
+- grid: waist −150…−10 mm and 260…500 mm, d0 100…350 µm, M² 1.0…1.8;
+- a candidate needs at least 10 usable stage positions;
+- no kit × rail lens may be feasible for the true beam **and** for all 27 corners
+  of z0 ±10 mm, d0 ±10 %, M² ±10 %;
+- pick the most usable positions.
+
+The result: 87 candidates; L8 at +260 mm, 130 µm, M² 1.0, with 25 usable positions.
+With d0 from 150 µm no candidate kept the margin, so the grid starts at 100 µm.
+
+**Margin of L1–L7** (report only): see `docs/change-lens-progress.md`. L1 and L4
+are borderline: their best lens fails at some of the 27 corners.
+
+**Calibration first.** Before the v3 plan is written, the scripted operator runs
+the 8 beam definitions with **calibration seeds 950–957** (not the v3 seeds), and
+the plan records the spread of its errors. **Nothing runs on seeds 900–907 before
+the plan is committed and pushed.**
+
+**Metrics:**
+- correct verdict;
+- for `iso_compliant` cases, a "measurement within tolerance" flag, with the same
+  tolerances as the end-to-end test:
+  - |M² error| ≤ 3 % on both axes;
+  - back-calculated d0 within 5 %;
+  - z0 within 0.1 × the true original zR;
+- lens choices, positions, model calls and cost.
+
+**Contenders, in this order:**
+1. `agent` (lens on, `view_frame` on);
+2. `scripted` (lens rule);
+3. `naive` (reference).
+
+**Cost:** an estimated $0.10–0.15 per agent run (lens runs need more calls), about
+$1 in total. **Hard stop at $2**: cases not run by then are reported as not run. One
+run per case; small N, stated as such.
+
+## 9. Work estimate and what to cut
+
+| Part | Hours |
+|---|---|
+| Lens physics module and known-answer tests (section 7, items 1–5) | 2 |
+| Session segments, transformed hidden beam, tests | 2 |
+| `change_lens` tool, `get_setup`, `lens_options` in `evaluate`, `finish` report, guards, tests | 3.5 |
+| Agent switch, schema, prompt section, tests | 1.5 |
+| Scripted lens rule and end-to-end test | 2 |
+| v3 plan, oracle with lenses, script support, run, results | 2.5 |
+| UI: "Lens kit" checkbox (default off), a log line per lens change, caustic plot of the current segment only; replay of `change_lens` and of old run files without segments | 1 |
+| Physics review, docs | 1.5 |
+| **Total** | **≈ 16 h** |
+
+The deadline is **Wed 4 Nov, 21:00 ET**. The hosted demo and the video script are
+still missing and matter more for the submission, so they should be scheduled
+first.
+
+**Cut in this order if behind:**
+1. UI segment display (the log line is enough);
+2. the second lens change (allow one only);
+3. σ propagation for the back-calculated values (report them without σ, labelled);
+4. the scripted lens rule (v3 becomes agent-only, stated openly);
+5. v3 itself (ship the feature with its tests only, no evaluation claims).
+
+## 10. ISO 11146-1 points to verify before calling this "compliant"
+
+From the official text (the project only had third-party copies; see the README),
+check whether 11146-1:
+1. Allows or requires an **artificial waist** when the waist is not accessible, and
+   in which words: for example the conditions under which a focusing element must
+   be used.
+2. Says what **"aberration-free" focusing element** means: any criterion or
+   tolerance, lens type, or f-number relative to the beam.
+3. Says whether the **transformed caustic must meet the same rules**: at least 10
+   positions, about half within one zR and half beyond 2 zR of the **artificial**
+   waist, and the same 3·d integration area and detector rules.
+4. Gives **formulas or a procedure for the original beam**: whether d0, z0 and
+   θ of the original beam are to be calculated from the artificial waist, and
+   whether the result must be labelled as calculated.
+5. States what the **test report** must contain for this method: lens focal
+   length, lens position, distances, and any uncertainty contribution from the
+   focal-length tolerance.
+6. Allows the per-axis treatment of **simple astigmatic** beams through a spherical
+   lens, and how lens misalignment is handled. Misalignment could create general
+   astigmatism.
+7. Changed any of this in the **2021 edition**; the project's wording basis is the
+   2005 edition, and 2021 is unverified.
+
+Until these are checked, the report and README say "ISO 11146-1 procedure applied
+at an artificial waist (thin-lens model)" and not "ISO compliant for the original
+beam".

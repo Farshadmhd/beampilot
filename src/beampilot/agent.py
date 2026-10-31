@@ -154,6 +154,27 @@ TOOL_DEFINITIONS = [
     }
     for schema in TOOL_SCHEMAS
 ]
+# change_lens is offered only when AgentConfig(change_lens=True) and the
+# session has a lens kit; otherwise tools and prompt stay exactly as before.
+CHANGE_LENS_DEFINITION = {
+    "type": "function",
+    "name": "change_lens",
+    "description": "Insert a thin lens of focal length f_mm (one of lens_kit_mm) "
+    "at lens_z_mm (on lens_rail_mm, before the stage) to form an artificial "
+    "waist. Starts a new beam segment; returns a prediction from the fit. "
+    "Costs one position.",
+    "strict": True,
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "f_mm": {"type": "number", "description": "Focal length in mm."},
+            "lens_z_mm": {"type": "number", "description": "Lens position in mm."},
+            "reason": _REASON,
+        },
+        "required": ["f_mm", "lens_z_mm", "reason"],
+        "additionalProperties": False,
+    },
+}
 # Images from view_frame stay in the resent history only for the most recent
 # views; older ones become a text stub, so a run does not resend every image
 # on every call.
@@ -165,6 +186,7 @@ TOOL_FUNCTIONS: dict[str, Callable[..., dict[str, Any]]] = {
     "measure_at": tools.measure_at,
     "retake_darks": tools.retake_darks,
     "view_frame": tools.view_frame,
+    "change_lens": tools.change_lens,
     "set_status": tools.set_status,
     "evaluate": tools.evaluate,
     "finish": tools.finish,
@@ -194,6 +216,10 @@ class AgentConfig:
         Offer the ``view_frame`` tool. False (for the ablation) removes the
         tool, the "Looking at frames" prompt section and the view budget.
         Default True.
+    change_lens : bool
+        Offer the ``change_lens`` tool (artificial waist) when the session has
+        a lens kit. Default False: tools, schemas and prompt are exactly as
+        without the feature, and a session's lens kit is removed.
     """
 
     model: str = DEFAULT_MODEL
@@ -203,6 +229,7 @@ class AgentConfig:
     max_cost_usd: float = 0.50
     max_output_tokens: int = 8000
     view_frame: bool = True
+    change_lens: bool = False
 
 
 @dataclass
@@ -250,11 +277,17 @@ class AgentRun:
         }
 
 
-def system_prompt(view_frame: bool = True) -> str:
+def system_prompt(view_frame: bool = True, change_lens: bool = False) -> str:
     """The system prompt from ``beampilot/prompts/system.md``.
 
-    With ``view_frame=False`` the "Looking at frames" section is left out.
+    With ``view_frame=False`` the "Looking at frames" section is left out; with
+    ``change_lens=True`` the section from ``prompts/change_lens.md`` is added.
     """
+    if change_lens:
+        lens_section = (
+            resources.files("beampilot") / "prompts" / "change_lens.md"
+        ).read_text(encoding="utf-8")
+        return system_prompt(view_frame) + lens_section
     text = (resources.files("beampilot") / "prompts" / "system.md").read_text(
         encoding="utf-8"
     )
@@ -351,11 +384,17 @@ def run_agent(
     config = config or AgentConfig()
     note = (operator_note or "").strip() or None
     run = AgentRun(config=config, operator_note=note)
-    instructions = system_prompt(config.view_frame)
+    lens_offered = config.change_lens and session.scenario.lens_kit is not None
+    if not lens_offered and session.scenario.lens_kit is not None:
+        # Switch off: the session behaves as one without a lens kit.
+        session.scenario = replace(session.scenario, lens_kit=None)
+    instructions = system_prompt(config.view_frame, lens_offered)
     tool_definitions = TOOL_DEFINITIONS
     if not config.view_frame:
         tool_definitions = [t for t in TOOL_DEFINITIONS if t["name"] != "view_frame"]
         session.scenario = replace(session.scenario, max_views=0)
+    if lens_offered:
+        tool_definitions = [*tool_definitions, CHANGE_LENS_DEFINITION]
     task = TASK if note is None else f"{TASK}\n\n{OPERATOR_NOTE_PREFIX}{note}"
     # Stateless conversation: the full history is resent on every call, with
     # the reasoning replayed from its encrypted content. Server-stored
@@ -412,7 +451,7 @@ def run_agent(
         for item in response.output:
             if getattr(item, "type", None) != "function_call":
                 continue
-            entry, result = _execute(session, item, config.view_frame)
+            entry, result = _execute(session, item, config.view_frame, lens_offered)
             step["tool_calls"].append(entry)
             if on_tool_call is not None:
                 on_tool_call(entry)
@@ -573,7 +612,10 @@ def _drop_old_images(history: list[dict[str, Any]], keep: int, new_from: int) ->
 
 
 def _execute(
-    session: MeasurementSession, item: Any, view_frame: bool = True
+    session: MeasurementSession,
+    item: Any,
+    view_frame: bool = True,
+    change_lens: bool = False,
 ) -> tuple[dict, dict]:
     """Run one function call through the tools; never raises."""
     name = item.name
@@ -586,10 +628,14 @@ def _execute(
         return {"name": name, "arguments": item.arguments, "result": result}, result
     reason = arguments.get("reason")
     function = TOOL_FUNCTIONS.get(name)
-    if name == "view_frame" and not view_frame:
+    offered = [
+        n
+        for n in TOOL_FUNCTIONS
+        if (view_frame or n != "view_frame") and (change_lens or n != "change_lens")
+    ]
+    if name not in offered:
         function = None
     if function is None:
-        offered = [n for n in TOOL_FUNCTIONS if view_frame or n != "view_frame"]
         result = {"error": f"unknown tool {name!r}; tools: {', '.join(offered)}"}
     else:
         call_arguments = dict(arguments)

@@ -27,7 +27,7 @@ import queue
 import threading
 import time
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -41,6 +41,7 @@ from beampilot.replay import RunState, SavedRun, load_run, replay_events
 from beampilot.session import (
     SCENARIOS,
     BeamParams,
+    LensKit,
     MeasurementSession,
     _camera,
     random_scenario,
@@ -65,6 +66,9 @@ GLOBAL_MAX_RUNS = 50
 DEFAULT_TOKEN_CAP = 60_000_000
 TOKEN_CAP_ENV = "BEAMPILOT_TOKEN_CAP"
 RUN_TIMEOUT_S = 15 * 60
+# "Lens kit" live runs (change_lens): the budget and call limit of evaluation v3.
+LENS_POSITIONS = 28
+LENS_MODEL_CALLS = 80
 EVENT_POLL_S = 0.25
 MAX_SEED = 1_000_000
 MAX_UPLOAD = "5mb"
@@ -415,6 +419,12 @@ def build_app():
                 lines=2,
                 max_length=500,
             )
+            lens_kit = gr.Checkbox(
+                value=False,
+                label="Lens kit: the agent may insert a thin lens to form an "
+                "artificial waist when the waist is outside the stage "
+                f"({LENS_POSITIONS} positions)",
+            )
             with gr.Row():
                 room_light = gr.Button("Room light on")
                 laser_power = gr.Button("Laser power x3")
@@ -455,8 +465,12 @@ def build_app():
             replay_run = gr.State(None)
 
         # Gradio passes the browser session only to parameters typed gr.Request.
-        def start_run(scenario_name, seed_value, note_text, request: gr.Request):
-            yield from live_run(scenario_name, seed_value, note_text, request)
+        def start_run(
+            scenario_name, seed_value, note_text, lens_on, request: gr.Request
+        ):
+            yield from live_run(
+                scenario_name, seed_value, note_text, request, lens_kit=bool(lens_on)
+            )
 
         def room_light_on(request: gr.Request) -> str:
             return inject_fault(request, "room_light")
@@ -474,7 +488,7 @@ def build_app():
         private = {"api_visibility": "private"}
         start.click(
             start_run,
-            inputs=[scenario, seed, note],
+            inputs=[scenario, seed, note, lens_kit],
             outputs=[
                 live_plot,
                 live_frame,
@@ -520,8 +534,18 @@ def _message(text: str) -> tuple:
     return (None, None, text, "", "", None, "")
 
 
-def live_run(scenario_name: str, seed: float, note: str, request: Any = None):
+def live_run(
+    scenario_name: str,
+    seed: float,
+    note: str,
+    request: Any = None,
+    lens_kit: bool = False,
+):
     """Run the agent in a thread and stream the UI updates (generator).
+
+    With `lens_kit` the scenario gets the lens kit and the agent may use
+    ``change_lens`` (artificial waist), with the budget and call limit of
+    evaluation v3.
 
     The worker thread does all bookkeeping (tokens per model reply, fallback
     report, saving, freeing the slots), so it is complete even if the browser
@@ -567,6 +591,12 @@ def live_run(scenario_name: str, seed: float, note: str, request: Any = None):
             if scenario_name == MYSTERY
             else SCENARIOS[scenario_name](seed)
         )
+        if lens_kit:
+            scenario = replace(
+                scenario,
+                lens_kit=LensKit(),
+                max_positions=max(scenario.max_positions, LENS_POSITIONS),
+            )
         session = MeasurementSession(scenario)
     except Exception as exc:  # noqa: BLE001 - e.g. no API key: free the slots
         _release(browser, started=False)
@@ -582,7 +612,9 @@ def live_run(scenario_name: str, seed: float, note: str, request: Any = None):
 
     tokens_left = min(SESSION_TOKEN_BUDGET - browser.tokens, _GLOBAL.tokens_left())
     config = AgentConfig(
-        max_total_tokens=min(AgentConfig().max_total_tokens, tokens_left)
+        max_total_tokens=min(AgentConfig().max_total_tokens, tokens_left),
+        change_lens=lens_kit,
+        **({"max_model_calls": LENS_MODEL_CALLS} if lens_kit else {}),
     )
     events: queue.Queue = queue.Queue()
     worker = threading.Thread(

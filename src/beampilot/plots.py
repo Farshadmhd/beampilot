@@ -45,7 +45,8 @@ def caustic_figure(
     matplotlib.figure.Figure
     """
     fig, ax = plt.subplots(figsize=(10.0, 5.6), dpi=110)
-    points = list(state.points.values())
+    # Only the current beam segment: after a lens change it is a new beam.
+    points = [p for p in state.points.values() if p.segment == state.segment]
     z_values = [p.z_mm for p in points]
     if stage_range_mm is not None:
         z_lo, z_hi = stage_range_mm

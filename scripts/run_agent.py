@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -29,6 +30,7 @@ from beampilot.agent import (
 )
 from beampilot.session import (
     SCENARIOS,
+    LensKit,
     MeasurementSession,
     random_scenario,
     reveal_truth,
@@ -97,17 +99,27 @@ def main() -> int:
     parser.add_argument("--effort", default=DEFAULT_EFFORT)
     parser.add_argument("--max-calls", type=int, default=60)
     parser.add_argument("--max-cost", type=float, default=0.50, help="USD per run")
+    parser.add_argument(
+        "--lens", action="store_true", help="add the lens kit and offer change_lens"
+    )
+    parser.add_argument("--max-positions", type=int, default=None)
     args = parser.parse_args()
 
     factory = (
         random_scenario if args.scenario == "mystery" else SCENARIOS[args.scenario]
     )
-    session = MeasurementSession(factory(seed=args.seed))
+    scenario = factory(seed=args.seed)
+    if args.lens:
+        scenario = replace(scenario, lens_kit=LensKit())
+    if args.max_positions is not None:
+        scenario = replace(scenario, max_positions=args.max_positions)
+    session = MeasurementSession(scenario)
     config = AgentConfig(
         model=args.model,
         reasoning_effort=args.effort,
         max_model_calls=args.max_calls,
         max_cost_usd=args.max_cost,
+        change_lens=args.lens,
     )
     print(
         f"== Agent run: {args.scenario}, seed {args.seed}, {args.model}, "

@@ -51,6 +51,9 @@ class CausticFit:
     success : bool
         True if the optimiser converged, d0 and theta are positive and all
         uncertainties are finite.
+    cov : tuple of tuple of float, optional
+        Covariance of (d0 in m, z0 in m, theta in rad), 3 x 3. Used to plan a
+        lens and to propagate uncertainties through it.
     """
 
     d0_m: float
@@ -66,6 +69,7 @@ class CausticFit:
     residual_rms: float
     n_points: int
     success: bool
+    cov: tuple[tuple[float, ...], ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -224,6 +228,7 @@ def fit_caustic(
         residual_rms=float(np.sqrt(np.mean(r**2))),
         n_points=int(z.size),
         success=success,
+        cov=tuple(tuple(float(v) for v in row) for row in cov),
     )
 
 
