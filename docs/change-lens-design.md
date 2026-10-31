@@ -181,15 +181,28 @@ that stage end first (decided 31 Oct 2026).
 - **Source.** The options come from the **internal fit** of each axis: the
   coefficients a, b, c of d² = a + b z + c z² and their covariance. The reported
   d0, z0 and zR are null when the waist is outside, so they cannot be used.
-- **Draws.** Python draws **200 samples** from that covariance per axis, with a
-  **fixed RNG seed** so the scripted operator stays deterministic. A draw with
+- **Draws.** Python draws **200 samples** per axis, with a **fixed RNG seed** so the
+  scripted operator stays deterministic. The fit is parametrised by d0, z0 and θ;
+  the draws are made in a, b, c from a covariance **linearised** to a, b, c (first
+  order, numerical Jacobian of a = d0² + θ²z0², b = −2θ²z0, c = θ²). A draw with
   c ≤ 0 or 4ac − b² ≤ 0 counts as infeasible.
+- **Waist diameter not determined (collapsed far-field fit).** A far-field-only
+  fit can collapse towards d0 = 0 while z0 and θ stay well determined. The waist
+  diameter counts as not determined when 4ac − b² ≤ 0, σ(d0)/d0 > 0.5, or the
+  fitted M² < 0.9. Then that axis is planned from θ and z0 only: b and c are drawn
+  from the linearised covariance (θ = √c, z0 = −b/(2c)), M² is drawn uniformly in
+  [1, 2], and d0 = 4λ·M²/(π·θ) for each draw. The nominal predicted values use
+  M² = 1.5. The options and the `change_lens` prediction carry the label "waist
+  diameter not determined; options assume M² between 1 and 2". This applies
+  inside lens planning only; `fit_caustic` is unchanged (decided 31 Oct 2026).
 - **Feasibility.** For each kit × rail combination, Python computes the fraction of
   draws in which it is feasible on both axes: predicted z0' inside the stage,
   d0' ≥ 110 µm, room for 5 near and 5 far points, and the beam at the lens
   ≤ 8 mm by the fit.
-- **Ranking.** Options are sorted by that fraction, then by the smallest margin
-  (the least spare room of near/far points over both axes, for the nominal fit).
+- **Ranking.** Options are sorted by that fraction, then by the **larger** spare
+  margin (the margin is the least spare room of near/far points over both axes,
+  for the nominal fit), then by the larger |f|, then by the lens closer to the
+  stage.
   **At most 5** are listed, each with its fraction and the nominal predicted d0',
   z0' and zR' per axis.
 

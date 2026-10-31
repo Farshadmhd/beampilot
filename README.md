@@ -114,6 +114,9 @@ differences are noise. Full tables: [docs/evaluation-summary.md](docs/evaluation
   "ISO compliant".
 - **Small evaluation.** One run per case per evaluation, on a single model and
   setting.
+- **Artificial waist (change_lens, in development).** The lens is modelled as an
+  exact thin lens. If a real lens is 1 % longer than its nominal focal length, the
+  reported z0 is off by minus the listed 'per +1 % f' value.
 
 ## Hackathon provenance
 

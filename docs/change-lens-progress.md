@@ -14,6 +14,9 @@ Branch `add-change-lens` (not merged). Design: [change-lens-design.md](change-le
 | Fix 1 | `7d0de04` | Fairness: after a lens, the scripted operator scouts from the prediction `change_lens` returns (the same the agent gets): at z0', ±1 zR' and ±2.5 zR', clipped to the stage, then its normal fill. |
 | Fix 2 | `2b4b829` | `lens_options` only for an axis `outside`; for `uncertain`, `evaluate` keeps its advice to measure closer to that stage end. |
 | Review E1 | `ebc1cd0` | A second lens is planned from the original beam (the fit is mapped back through the current lens first), as the simulator renders it. |
+| E2 | `bc6def7` | Collapsed far-field fit: planned from θ and z0 with M² in [1, 2], labelled. |
+| R1 | `4389598` | A clip refusal (truth-based) costs one position. |
+| v3 setup | `6fda336` | `scripts/v3_cases.py`: L1–L8 with 28 positions, the oracle with lenses (incl. `measurement_failed`), the recorded L8 choice. |
 
 Tests: see the latest commit (`.venv\Scripts\python.exe -m pytest`).
 
@@ -41,30 +44,24 @@ Tests: see the latest commit (`.venv\Scripts\python.exe -m pytest`).
      (`estimate_not_compliant`).
    - Positions: 11 measurements before the lens (4 of them retries after
      saturation or low signal), 1 for the lens, 12 after it.
-   - The v3 budget is a decision for the plan.
+   - Decided: the v3 budget is 28 positions for every contender (`6fda336`).
 2. (Resolved in fix 2.) Lens options are listed only for `outside`.
-3. **Collapsed far-field-only fit (review E2, dry run).** In 4 of 16 dry-run runs
-   (L3, L4, L7) the pre-lens fit collapsed: d0 → 0, M² ≈ 0, `success` still true,
-   σ_d0 absurd. The linearised a, b, c draws then all have 4ac − b² ≤ 0, so every
-   option has fraction 0. The note says "no kit lens looks feasible", although 1–5
-   options exist for the true beam, and the scripted operator ends
-   `waist_not_accessible`. Options from the review, a decision for the
-   maintainer:
-   - (a) floor d0 at the M² = 1 bound 4λ/(πθ) for planning, labelled;
-   - (b) a different note ("waist diameter not determined; measure closer to the
-     stage end");
-   - (c) mark such fits as not successful in `fit_caustic`.
-4. **Free truth probing via the 8 mm refusal (review R1).** A refused
-   `change_lens` costs nothing, so the clip check (truth-based yes/no) can be
-   repeated along the rail. Options: charge a position for a refused clip, or
-   check with the fit first.
-5. **L8 (waist at 450 mm)** ends `measurement_failed`: fewer than 4 usable
-   positions, no fit; the preliminary expected verdict was
-   `waist_not_accessible`.
-6. Sign note for the README (review R3): if a real lens is 1 % longer than its
-   nominal f, the reported z0 is off by −(dz0 per +1 % f).
-7. Doc nits: lens options are sorted by the larger spare margin; the design should
-   say that the draws use a covariance linearised to a, b, c.
-4. For waists after the stage, the focal-length sensitivity is about 1.2 mm in z0
+3. (Resolved in `bc6def7`.) **Collapsed far-field-only fit (review E2).** Inside
+   lens planning only, an undetermined waist diameter is planned from θ and z0
+   with M² drawn in [1, 2], and labelled. `fit_caustic` is unchanged.
+4. (Resolved in `4389598`.) **Truth probing via the 8 mm refusal (review R1).** A
+   refusal because the beam really clips at the lens now costs one position;
+   kit, rail, change-limit and finished-run refusals stay free.
+5. (Resolved in `6fda336`.) **L8 replaced.** The old L8 (waist at 450 mm) has no
+   usable stage position; the oracle now expects `measurement_failed` for fewer
+   than 5 usable positions. The new L8 (waist −20 mm, d0 230 µm, M² 1.0) was
+   chosen by a recorded search in `scripts/v3_cases.py`: 67 candidates with
+   ≥ 10 usable positions and no feasible lens; the one with the most usable
+   positions (44). It is a borderline case: the waist is about 0.5 zR before the
+   stage.
+6. (Resolved.) README sentence on the focal-length tolerance (review R3).
+7. (Resolved.) Design doc: sorting by the larger spare margin, linearised a, b, c
+   draws, and the collapsed-fit planning rule.
+8. For waists after the stage, the focal-length sensitivity is about 1.2 mm in z0
    per +1 % f (+750 mm lens), half of 0.1 zR. It is not simulated (the simulator
    uses the exact f), so the v3 tolerances do not include it.
