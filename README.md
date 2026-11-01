@@ -3,6 +3,10 @@
 An AI agent that measures a laser beam's M² to ISO 11146 on a simulated camera and
 stage, and says honestly when the standard cannot be met.
 
+**Hosted demo:** [Space page](https://huggingface.co/spaces/Farshadm/beampilot) ·
+[app](https://farshadm-beampilot.hf.space). Replays need no key; live runs are capped
+and may be switched off.
+
 ![A real BeamPilot run: caustic with accepted and rejected points and fits, next to a camera frame](docs/figures/hero.png)
 
 *A real agent run on a "mystery beam" (`docs/runs/mystery_s7.json`). Left: measured
