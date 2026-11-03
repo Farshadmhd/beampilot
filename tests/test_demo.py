@@ -503,3 +503,68 @@ def test_old_run_files_without_segments_still_replay() -> None:
         assert state.segment == 0 and state.points
         assert all(p.segment == 0 for p in state.points.values())
         assert isinstance(caustic_figure(state, (0.0, 250.0)), Figure)
+
+
+CLEAN_TRUTH_TABLE = """**Ground truth: clean**
+
+| Quantity | Axis | Measured | True | Error |
+|---|---|---|---|---|
+| Waist diameter d0 | x | 199.500 µm | 200.000 µm | -0.2 % |
+| Waist diameter d0 | y | 209.440 µm | 210.000 µm | -0.3 % |
+| Waist position z0 | x | 120.165 mm | 120.000 mm | +0.17 mm |
+| Waist position z0 | y | 120.164 mm | 120.000 mm | +0.16 mm |
+| Rayleigh length zR | x | 24.541 mm | 24.605 mm | -0.3 % |
+| Rayleigh length zR | y | 25.969 mm | 26.042 mm | -0.3 % |
+| M² | x | 1.197 | 1.200 | -0.2 % |
+| M² | y | 1.247 | 1.250 | -0.3 % |"""
+
+
+def test_truth_table_of_a_run_without_a_lens_is_unchanged() -> None:
+    run = load_run(demo_app.DEMO_RUNS_DIR / "clean_room_light_live.json")
+    assert demo_app.truth_table(run.data["report"], run.truth) == CLEAN_TRUTH_TABLE
+
+
+def test_truth_table_of_a_lens_run_compares_like_with_like() -> None:
+    """Back-calculated beam vs the original truth; artificial waist vs the truth
+    through the same lens. Every error is small (the old table showed -5.7 %
+    and +59.9 mm by comparing the artificial waist with the original beam)."""
+    from beampilot.lens import Waist, through_thin_lens
+
+    run = load_run(demo_app.DEMO_RUNS_DIR / "lens_smoke_s920.json")
+    truth = run.truth
+    table = demo_app.truth_table(run.data["report"], truth)
+    original, artificial = table.split(
+        "**Artificial waist (measured through the lens)**"
+    )
+    assert "**Original beam (back-calculated, not measured)**" in original
+    lens = run.data["report"]["lens"]
+    z_r_after = min(
+        through_thin_lens(
+            Waist(
+                truth[f"d0_{a}_um"] * 1e-6,
+                truth[f"z0_{a}_mm"] * 1e-3,
+                truth[f"z_r_{a}_mm"] * 1e-3,
+            ),
+            lens["f_mm"] * 1e-3,
+            lens["lens_z_mm"] * 1e-3,
+        ).z_r_m
+        * 1e3
+        for a in "xy"
+    )
+    z_r_true = min(truth["z_r_x_mm"], truth["z_r_y_mm"])
+    for block, z_r, rows in ((original, z_r_true, 6), (artificial, z_r_after, 4)):
+        errors = [
+            line.rsplit("|", 2)[1].strip()
+            for line in block.splitlines()
+            if line.startswith("| ") and not line.startswith("| Quantity")
+        ]
+        assert len(errors) == rows and all(errors)
+        for error in errors:
+            value = float(error.split()[0])
+            if error.endswith("%"):
+                assert abs(value) < 1.0, error
+            else:
+                assert error.endswith("mm") and abs(value) < 0.1 * z_r, error
+    assert "| Waist diameter d0 | y | 210.490 µm | 210.000 µm | +0.2 % |" in original
+    assert "| Waist position z0 | x | 9.905 mm | 9.957 mm | -0.05 mm |" in artificial
+    assert "- **lens_changes:** f 25 mm at -20 mm (segment 1)" in artificial
