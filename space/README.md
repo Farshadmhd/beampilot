@@ -22,4 +22,6 @@ caustic. All data is simulated, with a known ground truth.
 Replays of recorded runs need no API key. Live runs are capped and may be
 switched off.
 
+Demo video (2:58): https://youtu.be/itlCyx3K5g4
+
 Code, evaluation and documentation: https://github.com/Farshadmhd/beampilot
