@@ -43,6 +43,7 @@ import numpy as np
 
 from beampilot import tools
 from beampilot.agent import AgentConfig, AgentRun, make_client, run_agent, save_run
+from beampilot.lens import Waist, through_thin_lens
 from beampilot.plots import caustic_figure, frame_image
 from beampilot.replay import RunState, SavedRun, load_run, replay_events
 from beampilot.session import (
@@ -427,6 +428,8 @@ MEASURED_KEYS = {
     "z_r_{}_mm": "z_r_mm",
     "m2_{}": "m2",
 }
+# (quantity, unit) of the truth keys that describe one axis's waist.
+TRUTH_WAIST_KEYS = (("d0", "um"), ("z0", "mm"), ("z_r", "mm"))
 
 
 def truth_table(report: Any, truth: Any) -> str:
@@ -437,6 +440,13 @@ def truth_table(report: Any, truth: Any) -> str:
     """
     if not isinstance(truth, dict):
         return "_No ground truth for this run._"
+    lens = report.get("lens") if isinstance(report, dict) else None
+    if (
+        isinstance(lens, dict)
+        and _is_number(lens.get("f_mm"))
+        and _is_number(lens.get("lens_z_mm"))
+    ):
+        return _lens_truth_table(report, truth, lens)
     evaluation = report.get("evaluation") if isinstance(report, dict) else None
     evaluation = evaluation if isinstance(evaluation, dict) else {}
     lines = [
@@ -450,27 +460,105 @@ def truth_table(report: Any, truth: Any) -> str:
             true = truth.get(key.format(axis))
             fit = evaluation.get(axis)
             measured = fit.get(MEASURED_KEYS[key]) if isinstance(fit, dict) else None
-            error = ""
-            if _is_number(measured) and _is_number(true) and true:
-                error = (
-                    f"{(measured / true - 1) * 100:+.1f} %"
-                    if kind == "pct"
-                    else f"{measured - true:+.2f} mm"
-                )
-            shown = (
-                f"{measured:.3f} {unit}".strip()
-                if _is_number(measured)
-                else "not determined"
-            )
-            true_shown = f"{_shown(true, '.3f')} {unit}".strip()
-            lines.append(f"| {label} | {axis} | {shown} | {true_shown} | {error} |")
+            lines.append(_truth_row(label, axis, measured, true, unit, kind))
+    return "\n".join(lines + _hidden_lines(truth))
+
+
+def _lens_truth_table(report: dict, truth: dict, lens: dict) -> str:
+    """Truth table of a run with a lens (artificial waist), in two blocks.
+
+    The fit is of the artificial waist after the lens, so it is never compared
+    with the original beam. Instead the back-calculated original beam is
+    compared with the original truth, and the measured artificial waist with
+    the truth sent through the same thin lens (``through_thin_lens``, as in the
+    simulator), computed from the truth parameters, not from the fit.
+    """
+    f_m, lens_z_m = lens["f_mm"] * 1e-3, lens["lens_z_mm"] * 1e-3
+    back = report.get("original_beam_back_calculated")
+    measured = report.get("artificial_waist")
+    m2 = report.get("m2")
+    lines = [
+        f"**Ground truth: {truth.get('scenario', '?')}**",
+        "",
+        "**Original beam (back-calculated, not measured)**",
+        "",
+        "| Quantity | Axis | Back-calculated | True | Error |",
+        "|---|---|---|---|---|",
+    ]
+    for label, key, unit, kind in TRUTH_ROWS:
+        if key == "z_r_{}_mm":
+            continue
+        for axis in ("x", "y"):
+            source = m2 if key == "m2_{}" else back
+            fit = source.get(axis) if isinstance(source, dict) else None
+            value = fit.get(MEASURED_KEYS[key]) if isinstance(fit, dict) else None
+            true = truth.get(key.format(axis))
+            lines.append(_truth_row(label, axis, value, true, unit, kind))
+    lines += [
+        "",
+        "**Artificial waist (measured through the lens)**",
+        "",
+        "| Quantity | Axis | Measured | True after the lens | Error |",
+        "|---|---|---|---|---|",
+    ]
+    after = {axis: _truth_through_lens(truth, axis, f_m, lens_z_m) for axis in "xy"}
+    for label, key, unit, kind in TRUTH_ROWS[:2]:
+        for axis in ("x", "y"):
+            fit = measured.get(axis) if isinstance(measured, dict) else None
+            value = fit.get(MEASURED_KEYS[key]) if isinstance(fit, dict) else None
+            waist = after[axis]
+            true = None
+            if waist is not None:
+                true = waist.d0_m * 1e6 if key == "d0_{}_um" else waist.z0_m * 1e3
+            lines.append(_truth_row(label, axis, value, true, unit, kind))
+    return "\n".join(lines + _hidden_lines(truth))
+
+
+def _truth_through_lens(
+    truth: dict, axis: str, f_m: float, lens_z_m: float
+) -> Waist | None:
+    """The true waist of one axis after a thin lens (m), or None if unknown.
+
+    Parameters
+    ----------
+    truth : dict
+        Ground truth with d0 in um, z0 and zR in mm per axis.
+    axis : str
+        "x" or "y".
+    f_m, lens_z_m : float
+        Focal length and lens position in m.
+    """
+    d0, z0, z_r = (truth.get(f"{q}_{axis}_{u}") for q, u in TRUTH_WAIST_KEYS)
+    if not (_is_number(d0) and _is_number(z0) and _is_number(z_r)):
+        return None
+    return through_thin_lens(Waist(d0 * 1e-6, z0 * 1e-3, z_r * 1e-3), f_m, lens_z_m)
+
+
+def _truth_row(
+    label: str, axis: str, measured: Any, true: Any, unit: str, kind: str
+) -> str:
+    """One table row: value, truth and the error (% or, for positions, mm)."""
+    error = ""
+    if _is_number(measured) and _is_number(true) and true:
+        error = (
+            f"{(measured / true - 1) * 100:+.1f} %"
+            if kind == "pct"
+            else f"{measured - true:+.2f} mm"
+        )
+    shown = (
+        f"{measured:.3f} {unit}".strip() if _is_number(measured) else "not determined"
+    )
+    true_shown = f"{_shown(true, '.3f')} {unit}".strip()
+    return f"| {label} | {axis} | {shown} | {true_shown} | {error} |"
+
+
+def _hidden_lines(truth: dict) -> list[str]:
+    """Hidden faults of the scenario, listed below the table."""
     standard = {"scenario", "wavelength_nm"} | {
         key.format(axis) for _, key, _, _ in TRUTH_ROWS for axis in ("x", "y")
     }
     extras = [f"- **{k}:** {v}" for k, v in truth.items() if k not in standard]
-    if extras:
-        lines += ["", "Hidden in this scenario:", *extras]
-    return "\n".join(lines)
+    return ["", "Hidden in this scenario:", *extras] if extras else []
 
 
 def _is_number(value: Any) -> bool:
